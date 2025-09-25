@@ -1,8 +1,8 @@
 import click
 
-from .cli.project_commands import project
-from .cli.corpus_commands import corpus
-from .cli.vector_commands import vector
+from cli.project_commands import project
+from cli.corpus_commands import corpus
+from cli.vector_commands import vector
 
 @click.group()
 def cli():
