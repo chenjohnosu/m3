@@ -10,12 +10,12 @@ def project():
 @click.argument('project_name')
 def create(project_name):
     """Creates a new project."""
-    project_manager.create(project_name)
+    project_manager.create_project(project_name)
 
 @project.command("list")
 def list_cmd():
     """Lists all available projects."""
-    project_manager.list_all()
+    project_manager.list_projects()
 
 @project.command("remove")
 @click.argument('project_name')
