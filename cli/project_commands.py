@@ -21,7 +21,7 @@ def list_cmd():
 @click.argument('project_name')
 def remove(project_name):
     """Removes a project and all its data."""
-    project_manager.remove(project_name)
+    project_manager.delete_project(project_name)
 
 @project.command("dialogue")
 @click.argument('project_name')
