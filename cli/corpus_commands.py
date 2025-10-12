@@ -1,5 +1,5 @@
 import click
-from ..core import project_manager
+from core import project_manager
 
 @click.group()
 def corpus():

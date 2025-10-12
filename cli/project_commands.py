@@ -1,5 +1,5 @@
 import click
-from ..core import project_manager, llm_dialogue
+from core import project_manager, llm_dialogue
 
 @click.group()
 def project():

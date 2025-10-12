@@ -1,5 +1,5 @@
 import click
-from ..core import vector_manager
+from core import vector_manager
 
 @click.group()
 def vector():
