@@ -1,7 +1,7 @@
 import click
 import shutil
 from pathlib import Path
-from utils.config import load_config
+from utils.config import load_config, set_active_project, get_active_project
 
 # Load the configuration at the module level
 config = load_config()
@@ -44,13 +44,27 @@ def list_projects():
         return
 
     projects = [p.name for p in PROJECTS_DIR.iterdir() if p.is_dir()]
+    active_project = get_active_project()
 
     if not projects:
         click.echo("No projects found.")
     else:
         click.echo("Available projects:")
         for project in sorted(projects):
-            click.echo(f"- {project}")
+            if project == active_project:
+                click.echo(f"- {project} (active)")
+            else:
+                click.echo(f"- {project}")
+
+def set_active(project_name):
+    """Sets the active project."""
+    project_path = PROJECTS_DIR / project_name
+    if not project_path.exists():
+        click.echo(f"Error: Project '{project_name}' not found.")
+        return
+    set_active_project(project_name)
+    click.echo(f"Project '{project_name}' is now active.")
+
 
 def add_file_to_project(project_name, file_path):
     """Placeholder for adding a file to a project."""

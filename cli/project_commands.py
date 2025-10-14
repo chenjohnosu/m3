@@ -28,3 +28,9 @@ def remove(project_name):
 def dialogue(project_name):
     """Starts a dialogue session with the project's data."""
     llm_dialogue.start_dialogue(project_name)
+
+@project.command("active")
+@click.argument('project_name')
+def active(project_name):
+    """Sets the active project."""
+    project_manager.set_active(project_name)
