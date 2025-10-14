@@ -1,5 +1,12 @@
 click
-pyyaml
+PyYAML
 chromadb
+llama-index
+# REMOVED: llama-index-embeddings-ollama
+# NEW: Add these libraries
+llama-index-embeddings-huggingface
+sentence-transformers
+torch
+llama-index-vector-stores-chroma
 PyPDF2
-docx
+python-docx
