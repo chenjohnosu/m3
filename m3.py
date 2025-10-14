@@ -5,6 +5,7 @@ import sys
 from cli.project_commands import project
 from cli.corpus_commands import corpus
 from cli.vector_commands import vector
+from cli.analyze_commands import analyze  # Import the new command
 from utils.config import get_active_project
 
 
@@ -31,6 +32,7 @@ def show_interactive_help():
     click.echo("  /project  - Manage projects")
     click.echo("  /corpus   - Manage a project's corpus")
     click.echo("  /vector   - Manage a project's vector store")
+    click.echo("  /analyze  - Analyze project data")  # Add new command to help
     click.echo("  /help     - Show this help message")
     click.echo("  /quit     - Exit interactive mode")
 
@@ -48,7 +50,6 @@ def show_subcommand_help(command_name):
         if sub_cmd and not sub_cmd.hidden:
             commands.append((subcommand, sub_cmd.get_short_help_str()))
 
-    # Instantiate the formatter directly, without a 'with' statement.
     formatter = click.formatting.HelpFormatter()
     formatter.write_dl(commands)
     click.echo(formatter.getvalue(), nl=False)
@@ -71,7 +72,6 @@ def interactive_mode():
                 click.echo("Error: Invalid command format. Commands must start with a '/'.")
                 continue
 
-            # Process the command
             command_to_process = command[1:]
             args = shlex.split(command_to_process)
 
@@ -93,19 +93,16 @@ def interactive_mode():
                 show_interactive_help()
                 continue
 
-            # If a command is entered with no arguments, show its subcommand help
             if len(args) == 1:
                 show_subcommand_help(cmd)
                 continue
 
-            # Execute the command with its arguments
             with cli.make_context(cli.name, args, resilient_parsing=True) as ctx:
                 cli.invoke(ctx)
 
         except (EOFError, KeyboardInterrupt):
             break
         except click.exceptions.UsageError as e:
-            # Catch and display usage errors cleanly
             click.echo(f"Error: {e.format_message()}", err=True)
         except Exception as e:
             click.echo(f"An unexpected error occurred: {e}", err=True)
@@ -135,6 +132,7 @@ def batch_mode(filename):
 cli.add_command(project)
 cli.add_command(corpus)
 cli.add_command(vector)
+cli.add_command(analyze)  # Register the new command
 
 if __name__ == '__main__':
     cli(obj={})
