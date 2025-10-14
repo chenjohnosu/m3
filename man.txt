@@ -1,0 +1,123 @@
+M3(1)                            User Manuals                            M3(1)NAMEm3 - a local-first document analysis toolkitSYNOPSISm3 [OPTIONS] COMMAND [ARGS]...   m3 --go
+
+   m3 --batch <FILENAME>
+DESCRIPTIONm3 (monkey3) is a command-line tool designed for managing andpreparing collections of text documents for semantic analysis. Itprovides a project-based workflow to ingest documents in variousformats (.txt, .pdf, .docx), track their versions, and convert theircontent into a searchable vector store using local, self-hostedembedding models.MODES OF OPERATIONCommand-line modeExecute a single command and exit. This is the default mode.   Interactive mode (--go)
+          Enter a read-eval-print loop (REPL) for executing multiple
+          commands in a session. In this mode, all commands must be
+          preceded by a forward slash (/). For example: /project list.
+
+   Batch mode (--batch <FILENAME>)
+          Execute a sequence of m3 commands from a specified text file.
+          Blank lines and lines beginning with # are ignored.
+COMMANDSThe following commands are available:   project
+          Commands for managing projects.
+
+          create <PROJECT_NAME>
+                 Creates a new, empty project with a corpus and a vector
+                 store.
+
+          list
+                 Lists all available projects. An (active) marker
+                 indicates the current project.
+
+          active <PROJECT_NAME>
+                 Sets the active project for the current session.
+
+          remove <PROJECT_NAME>
+                 Permanently deletes a project and all its associated
+                 data, including the corpus and vector store.
+
+          dialogue <PROJECT_NAME>
+                 (Placeholder) Starts an interactive dialogue session
+                 with the project's data.
+
+   corpus
+          Commands for managing the active project's corpus.
+
+          add <PATH>[ <PATH>]...
+                 Adds one or more files to the active project's corpus.
+                 The path can be a single file, a directory (all files
+                 within will be added recursively), or a wildcard pattern
+                 (e.g., "data/*.txt").
+
+          remove <FILENAME>
+                 Removes a file from the active project's corpus and its
+                 corresponding entries from the vector store.
+
+          list
+                 Lists all files in the active project's corpus,
+                 including their version number and unique ID (UUID).
+
+          ingest
+                 Processes all new or updated files in the corpus,
+                 converts them to text, and stores them as vector
+                 embeddings in the project's vector store.
+
+   vector
+          Commands for managing the active project's vector store.
+
+          status
+                 Displays a detailed status of the vector store, including
+                 its location, the number of indexed text chunks, and the
+                 active embedding model configuration.
+
+          create
+                 Creates a new, blank vector store for the active project.
+                 If a store already exists, it will be wiped clean. This
+                 is useful for resetting a corrupted store or starting an
+                 ingestion from scratch.
+
+          chunks <FILENAME>
+                 Retrieves and displays the text content of all chunks
+                 for a specific file that has been ingested into the
+                 vector store. Useful for debugging the text-splitting
+                 process.
+
+   analyze
+          Commands for analyzing project data.
+
+          query <QUERY_TERM>
+                 (Placeholder) Searches the vector store for a given term.
+CONFIGURATION
+    The main configuration is stored in ~/.monkey3/config.yaml. This file
+    controls the embedding models and other settings.   embedding_profiles
+    Defines one or more profiles for the ingestion process. Each
+    profile specifies the embed_model (from Hugging Face), the
+   chunk_size, and the chunk_overlap.
+
+   active_profile
+          Specifies which of the embedding_profiles to use when running
+          the /corpus ingest command.
+FILES
+    ~/.monkey3/The base directory for all m3 data and configuration.   ~/.monkey3/config.yaml
+          The global configuration file.
+
+   ~/.monkey3/projects/<PROJECT_NAME>/
+          The directory for a specific project.
+
+   ~/.monkey3/projects/<PROJECT_NAME>/corpus/
+          Contains the original documents and the manifest.
+
+   ~/.monkey3/projects/<PROJECT_NAME>/corpus/corpus_manifest.json
+          A JSON file that tracks every file in the corpus, including
+          its version, content hash, and unique ID.
+
+   ~/.monkey3/projects/<PROJECT_NAME>/vector_store/
+          Contains the ChromaDB persistent vector store.
+EXAMPLES
+A typical workflow:   # Create and activate a new project
+   $ m3 project create my_research
+   $ m3 project active my_research
+
+   # Add all text files from a local directory
+   $ m3 corpus add "path/to/notes/*.txt"
+
+   # Ingest the files into the vector store
+   $ m3 corpus ingest
+
+   # Check the status
+   $ m3 vector status
+
+   # Inspect the chunks for a specific file
+   $ m3 vector chunks my_document.txt
+M3(1)                            October 2025                            M3(1)
