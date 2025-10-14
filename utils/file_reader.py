@@ -19,12 +19,12 @@ def read_file(file_path: Path):
     text_content = ""
 
     try:
-        if suffix == ".txt" or suffix == ".md":
-            with open(file_path, 'r', encoding='utf-8') as f:
+        if suffix in [".txt", ".md"]:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 text_content = f.read()
         elif suffix == ".pdf":
             if PyPDF2 is None:
-                click.echo("Warning: 'PyPDF2' package not found. Skipping PDF file. Please run 'pip install PyPDF2'.", err=True)
+                click.echo("Warning: 'PyPDF2' not installed. Skipping PDF. Run 'pip install PyPDF2'.", err=True)
                 return file_path.name, None
             with open(file_path, 'rb') as f:
                 reader = PyPDF2.PdfReader(f)
@@ -32,13 +32,13 @@ def read_file(file_path: Path):
                     text_content += page.extract_text() + "\n"
         elif suffix == ".docx":
             if docx is None:
-                click.echo("Warning: 'python-docx' package not found. Skipping DOCX file. Please run 'pip install python-docx'.", err=True)
+                click.echo("Warning: 'python-docx' not installed. Skipping DOCX. Run 'pip install python-docx'.", err=True)
                 return file_path.name, None
             doc = docx.Document(file_path)
             for para in doc.paragraphs:
                 text_content += para.text + "\n"
         else:
-            click.echo(f"Warning: Unsupported file type '{suffix}'. Skipping file '{file_path.name}'.", err=True)
+            click.echo(f"Warning: Unsupported file type '{suffix}'. Skipping '{file_path.name}'.", err=True)
             return file_path.name, None
 
         return file_path.name, text_content
