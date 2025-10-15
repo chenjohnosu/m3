@@ -1,25 +1,37 @@
 # ==============================================================================
 # M3 CONFIGURATION FILE
 # ==============================================================================
+# This file defines the global settings for your m3 tool.
+# A user-specific version will be created and managed at ~/.monkey3/config.yaml
+# ==============================================================================
+
 project_settings:
-  data_directory: './m3_data'
+  # Defines the directory where all project data will be stored.
+  # Using '~/.monkey3/projects' is the recommended default.
+  projects_directory: '~/.monkey3/projects'
+
+# ==============================================================================
+# EMBEDDING MODEL SETTINGS
+# ==============================================================================
+embedding_settings:
+  provider: 'ollama'
+  # Change this line to your preferred model
+  model_name: 'jeffh/intfloat-multilingual-e5-large:f16' # <--- YOUR PREFERRED MODEL HERE
 
 # ==============================================================================
 # LLM PROVIDER DEFINITIONS
 # ==============================================================================
-# Define the LLMs you want to use. You can define multiple models from the
-# same provider (e.g., two different Ollama models).
+# Define the LLMs you want to use, served via Ollama.
 llm_providers:
-  # This is the client for your local Ollama server
   ollama_client:
     provider: 'ollama'
     base_url: 'http://localhost:11434'
     models:
-      # Define a powerful model for complex reasoning and synthesis
+      # A powerful model for complex reasoning (e.g., llama3, mixtral)
       synthesis_model:
-        model_name: 'llama3'
+        model_name: 'mixtral'
         request_timeout: 120.0
-      # Define a fast model for routine tasks like enrichment
+      # A fast model for routine tasks (e.g., mistral, llama3:8b)
       enrichment_model:
         model_name: 'mistral'
         request_timeout: 60.0
@@ -28,6 +40,7 @@ llm_providers:
 # INGESTION PIPELINE SETTINGS
 # ==============================================================================
 ingestion_config:
+  # Pre-defined list of document types for the `corpus add --type` command
   known_doc_types:
     - 'document'
     - 'interview'
@@ -36,11 +49,12 @@ ingestion_config:
     - 'observation'
     - 'ethnographic_notes'
 
+  # The default document type if the --type flag is not used.
   default_doc_type: 'document'
 
-  # Assign the LLMs defined above to the pipeline stages.
+  # Assigns the LLMs defined above to the specific stages of the pipeline.
   cogarc_settings:
-    stage_0_model: 'synthesis_model'  # Use the powerful model for stratification
-    stage_1_model: 'synthesis_model'  # and for structural analysis
-    stage_2_model: 'enrichment_model' # Use the faster model for enriching chunks
-    stage_3_model: 'synthesis_model'  # Use the powerful model for the final summary
+    stage_0_model: 'synthesis_model'
+    stage_1_model: 'synthesis_model'
+    stage_2_model: 'enrichment_model'
+    stage_3_model: 'synthesis_model'

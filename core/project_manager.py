@@ -1,6 +1,6 @@
 import os
-import json
-from m3.utils.config import get_config
+import shutil
+from utils.config import get_config
 
 
 class ProjectManager:
@@ -9,11 +9,8 @@ class ProjectManager:
     def __init__(self):
         config = get_config()
         project_settings = config.get('project_settings', {})
-
-        # All projects are now stored under the directory specified in the config
         raw_projects_dir = project_settings.get('projects_directory', '~/.monkey3/projects')
         self.projects_dir = os.path.expanduser(raw_projects_dir)
-
         self.active_project_file = os.path.join(os.path.dirname(self.projects_dir), '.active_project')
         os.makedirs(self.projects_dir, exist_ok=True)
 
@@ -24,7 +21,6 @@ class ProjectManager:
             return None, f"Project '{project_name}' already exists."
 
         os.makedirs(project_path)
-        # You could create other subdirectories here like 'notes', 'data', etc.
         self.set_active_project(project_name)
         return project_path, f"Project '{project_name}' initialized and set as active."
 
@@ -51,6 +47,24 @@ class ProjectManager:
 
         project_path = os.path.join(self.projects_dir, project_name)
         if not os.path.isdir(project_path):
-            return None, None  # Active project directory was deleted
+            # Active project directory might have been deleted manually
+            os.remove(self.active_project_file)
+            return None, None
 
         return project_name, project_path
+
+    def remove_project(self, project_name):
+        """Permanently deletes a project directory and its contents."""
+        project_path = os.path.join(self.projects_dir, project_name)
+        if not os.path.isdir(project_path):
+            return False, f"Project '{project_name}' not found."
+
+        active_project, _ = self.get_active_project()
+        if active_project == project_name:
+            os.remove(self.active_project_file)
+
+        try:
+            shutil.rmtree(project_path)
+            return True, f"Project '{project_name}' has been deleted."
+        except OSError as e:
+            return False, f"Error deleting project: {e}"

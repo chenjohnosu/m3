@@ -5,8 +5,9 @@ import sys
 from cli.project_commands import project
 from cli.corpus_commands import corpus
 from cli.vector_commands import vector
-from cli.analyze_commands import analyze  # Import the new command
-from utils.config import get_active_project
+from cli.analyze_commands import analyze
+# Import the new ProjectManager to get the active project correctly
+from core.project_manager import ProjectManager
 
 
 @click.group(invoke_without_command=True)
@@ -15,7 +16,7 @@ from utils.config import get_active_project
 @click.pass_context
 def cli(ctx, go, batch_file):
     """
-    monkey3 (m3): A tool for qualitative data analysis powered by local LLMs.
+    m3: A tool for qualitative data analysis powered by local LLMs.
     """
     if ctx.invoked_subcommand is None:
         if go:
@@ -32,7 +33,7 @@ def show_interactive_help():
     click.echo("  /project  - Manage projects")
     click.echo("  /corpus   - Manage a project's corpus")
     click.echo("  /vector   - Manage a project's vector store")
-    click.echo("  /analyze  - Analyze project data")  # Add new command to help
+    click.echo("  /analyze  - Analyze project data")
     click.echo("  /help     - Show this help message")
     click.echo("  /quit     - Exit interactive mode")
 
@@ -59,9 +60,14 @@ def interactive_mode():
     """Starts a clean, simplified interactive REPL session."""
     click.echo("Entering interactive mode. Use '/quit' to exit.")
 
+    # Instantiate the ProjectManager once to use in the loop
+    project_manager = ProjectManager()
+
     while True:
-        active_project = get_active_project()
+        # Get the active project using the manager
+        active_project, _ = project_manager.get_active_project()
         prompt = f"[m3:{active_project}]> " if active_project else "[m3]> "
+
         try:
             command = input(prompt).strip()
 
@@ -132,7 +138,7 @@ def batch_mode(filename):
 cli.add_command(project)
 cli.add_command(corpus)
 cli.add_command(vector)
-cli.add_command(analyze)  # Register the new command
+cli.add_command(analyze)
 
 if __name__ == '__main__':
     cli(obj={})

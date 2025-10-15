@@ -1,63 +1,79 @@
 import click
-from m3.core.vector_manager import VectorManager
-from m3.utils.config import get_config
-
+from core.vector_manager import VectorManager
+from utils.config import get_config
 
 @click.group()
 def corpus():
-    """Manages the document corpus."""
+    """Manages the document corpus for the active project."""
     pass
-
 
 @corpus.command('add')
 @click.argument('paths', nargs=-1, type=click.Path(exists=True, readable=True))
 @click.option('--type', 'doc_type',
               type=click.Choice(get_config().get('ingestion_config', {}).get('known_doc_types', ['document'])),
               default=None,
-              help='The type of document being added. Determines the processing pipeline.')
+              help='The type of document being added.')
 def add(paths, doc_type):
-    """
-    Adds one or more files to the corpus with a specified document type.
-
-    This command processes the files using the appropriate ingestion pipeline
-    based on the --type flag. For example, using '--type interview' will
-    trigger the 'cogarc' pipeline for deep analysis.
-    """
+    """Adds one or more files/directories to the active project's corpus."""
     if not paths:
-        click.echo("Error: No file paths provided. Please specify one or more files to add.")
+        click.echo("Error: No file paths provided.")
         return
 
     config = get_config()
-
-    # If type is not provided, use the default from config
     if not doc_type:
         doc_type = config.get('ingestion_config', {}).get('default_doc_type', 'document')
         click.echo(f"No --type specified, using default: '{doc_type}'")
 
-    vector_manager = VectorManager(config)
-    vector_manager.add_to_corpus(list(paths), doc_type)
+    try:
+        manager = VectorManager(config)
+        manager.add_to_corpus(list(paths), doc_type)
+        click.secho(f"\n✅ Successfully added and processed {len(paths)} path(s).", fg="green")
+    except Exception as e:
+        click.secho(f"🔥 Error: {e}", fg="red")
 
-    click.secho(f"\n✅ Successfully added {len(paths)} file(s) to the corpus as type '{doc_type}'.", fg="green")
+@corpus.command('remove')
+@click.argument('filename')
+def remove(filename):
+    """Removes a file from the corpus and vector store."""
+    try:
+        manager = VectorManager()
+        success, message = manager.remove_from_corpus(filename)
+        if success:
+            click.secho(f"Success: {message}", fg="green")
+        else:
+            click.secho(f"Error: {message}", fg="red")
+    except Exception as e:
+        click.secho(f"🔥 Error: {e}", fg="red")
 
 
 @corpus.command('list')
 def list_files():
-    """
-    Lists all files currently in the corpus and their assigned type.
-    """
-    config = get_config()
-    vector_manager = VectorManager(config)
-    corpus_items = vector_manager.list_corpus()
+    """Lists all files in the active project's corpus."""
+    try:
+        manager = VectorManager()
+        corpus_items = manager.list_corpus()
+        if not corpus_items:
+            click.echo("The corpus is currently empty.")
+            return
 
-    if not corpus_items:
-        click.echo("The corpus is currently empty.")
-        return
+        click.echo("\n--- Corpus Contents ---")
+        click.echo(f"{'Document Type':<20} | {'File Path'}")
+        click.echo("-" * 70)
+        for path, meta in sorted(corpus_items.items(), key=lambda item: item[1]['doc_type']):
+            doc_type = meta.get('doc_type', 'N/A')
+            click.secho(f"{doc_type:<20}", fg="cyan", nl=False)
+            click.echo(f" | {path}")
+        click.echo("-" * 70)
+    except Exception as e:
+        click.secho(f"🔥 Error: {e}", fg="red")
 
-    click.echo("\n--- Corpus Contents ---")
-    click.echo(f"{'Document Type':<20} | {'File Path'}")
-    click.echo("-" * 70)
-    for path, meta in sorted(corpus_items.items(), key=lambda item: item[1]['doc_type']):
-        doc_type = meta.get('doc_type', 'N/A')
-        click.secho(f"{doc_type:<20}", fg="cyan", nl=False)
-        click.echo(f" | {path}")
-    click.echo("-" * 70)
+@corpus.command('ingest')
+def ingest():
+    """Processes all new or updated files in the corpus."""
+    try:
+        click.echo("This command will re-process the entire corpus, which can be time-consuming.")
+        click.confirm("Are you sure you want to proceed?", abort=True)
+        manager = VectorManager()
+        manager.rebuild_vector_store()
+    except Exception as e:
+        click.secho(f"🔥 Error: {e}", fg="red")

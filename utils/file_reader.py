@@ -1,48 +1,45 @@
-from pathlib import Path
-import click
-try:
-    import PyPDF2
-except ImportError:
-    PyPDF2 = None
+import os
+from llama_index.core import SimpleDirectoryReader
 
-try:
-    import docx
-except ImportError:
-    docx = None
 
-def read_file(file_path: Path):
+def read_files(paths):
     """
-    Extracts text content from various file types.
-    Returns the filename and its text content.
-    """
-    suffix = file_path.suffix.lower()
-    text_content = ""
+    Reads a list of files and directories and returns a list of Document objects.
 
+    This function is designed to handle a mixed list of input paths. It will
+    recursively load all supported file types from directories and also load
+    any individual files specified.
+
+    Args:
+        paths (list): A list of strings, where each string is a path to a
+                      file or a directory.
+
+    Returns:
+        list: A list of LlamaIndex Document objects, ready for processing.
+    """
+    documents = []
+
+    # Separate the paths into files and directories for the reader
+    input_files = [p for p in paths if os.path.isfile(p)]
+    input_dirs = [p for p in paths if os.path.isdir(p)]
+
+    if not input_files and not input_dirs:
+        print("Warning: No valid files or directories found in the provided paths.")
+        return documents
+
+    # Use SimpleDirectoryReader which can handle both files and directories
+    # It will recursively search directories for supported file types.
+    reader = SimpleDirectoryReader(
+        input_dir=input_dirs[0] if input_dirs else None,
+        input_files=input_files if input_files else None,
+        recursive=True
+    )
+
+    # The reader's load_data method returns the Document objects
     try:
-        if suffix in [".txt", ".md"]:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                text_content = f.read()
-        elif suffix == ".pdf":
-            if PyPDF2 is None:
-                click.echo("Warning: 'PyPDF2' not installed. Skipping PDF. Run 'pip install PyPDF2'.", err=True)
-                return file_path.name, None
-            with open(file_path, 'rb') as f:
-                reader = PyPDF2.PdfReader(f)
-                for page in reader.pages:
-                    text_content += page.extract_text() + "\n"
-        elif suffix == ".docx":
-            if docx is None:
-                click.echo("Warning: 'python-docx' not installed. Skipping DOCX. Run 'pip install python-docx'.", err=True)
-                return file_path.name, None
-            doc = docx.Document(file_path)
-            for para in doc.paragraphs:
-                text_content += para.text + "\n"
-        else:
-            click.echo(f"Warning: Unsupported file type '{suffix}'. Skipping '{file_path.name}'.", err=True)
-            return file_path.name, None
-
-        return file_path.name, text_content
-
+        loaded_documents = reader.load_data()
+        print(f"Successfully loaded {len(loaded_documents)} document(s).")
+        return loaded_documents
     except Exception as e:
-        click.echo(f"Error reading file {file_path.name}: {e}", err=True)
-        return file_path.name, None
+        print(f"🔥 An error occurred while reading files: {e}")
+        return []
