@@ -1,0 +1,46 @@
+# ==============================================================================
+# M3 CONFIGURATION FILE
+# ==============================================================================
+project_settings:
+  data_directory: './m3_data'
+
+# ==============================================================================
+# LLM PROVIDER DEFINITIONS
+# ==============================================================================
+# Define the LLMs you want to use. You can define multiple models from the
+# same provider (e.g., two different Ollama models).
+llm_providers:
+  # This is the client for your local Ollama server
+  ollama_client:
+    provider: 'ollama'
+    base_url: 'http://localhost:11434'
+    models:
+      # Define a powerful model for complex reasoning and synthesis
+      synthesis_model:
+        model_name: 'llama3'
+        request_timeout: 120.0
+      # Define a fast model for routine tasks like enrichment
+      enrichment_model:
+        model_name: 'mistral'
+        request_timeout: 60.0
+
+# ==============================================================================
+# INGESTION PIPELINE SETTINGS
+# ==============================================================================
+ingestion_config:
+  known_doc_types:
+    - 'document'
+    - 'interview'
+    - 'paper'
+    - 'data'
+    - 'observation'
+    - 'ethnographic_notes'
+
+  default_doc_type: 'document'
+
+  # Assign the LLMs defined above to the pipeline stages.
+  cogarc_settings:
+    stage_0_model: 'synthesis_model'  # Use the powerful model for stratification
+    stage_1_model: 'synthesis_model'  # and for structural analysis
+    stage_2_model: 'enrichment_model' # Use the faster model for enriching chunks
+    stage_3_model: 'synthesis_model'  # Use the powerful model for the final summary
