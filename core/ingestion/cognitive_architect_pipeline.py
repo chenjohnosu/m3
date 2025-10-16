@@ -32,6 +32,9 @@ class CognitiveArchitectPipeline(BasePipeline):
 
         if doc_type == 'interview':
             pipeline_data = self.stage_0.process(pipeline_data)
+            # After stage 0, the documents are in 'answers'. Move them to 'documents' for the next stages.
+            if 'answers' in pipeline_data:
+                pipeline_data['documents'] = pipeline_data.pop('answers')
         else:
             print("Skipping Stage 0 (Q&A Stratification) for non-interview document.")
 
