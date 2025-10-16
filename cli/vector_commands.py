@@ -27,11 +27,11 @@ def create():
 
 
 @vector.command('chunks')
-@click.argument('filename')
-def chunks(filename):
-    """Retrieves and displays the text chunks for a specific file."""
+@click.argument('identifier')
+def chunks(identifier):
+    """Retrieves and displays text chunks for a file by its ID or original filename."""
     try:
         manager = VectorManager()
-        manager.get_file_chunks(filename)
+        manager.get_file_chunks(identifier)
     except Exception as e:
         click.secho(f"🔥 Error: {e}", fg="red")

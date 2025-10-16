@@ -10,13 +10,20 @@ from llama_index.core import VectorStoreIndex, StorageContext, Settings
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 import chromadb
+# Import ChromaDB settings to enable reset functionality
+from chromadb.config import Settings as ChromaSettings
 
 # Project-specific components
 from core.ingestion.pipeline_factory import get_pipeline
 from utils.file_reader import read_files
 from core.project_manager import ProjectManager
 from core.llm_manager import LLMManager
+from utils.file_handler import read_file  # Using your file_handler
 from pathlib import Path
+
+# --- CACHE FOR LAZY LOADING ---
+# This variable will hold the embedding model after it's loaded the first time.
+_cached_embed_model = None
 
 
 def get_file_hash(file_path):
@@ -35,6 +42,7 @@ class VectorManager:
     """
 
     def __init__(self, config=None):
+        global _cached_embed_model
         from utils.config import get_config
         self.config = config or get_config()
         self.project_manager = ProjectManager()
@@ -53,15 +61,19 @@ class VectorManager:
         # Ensure corpus directory exists
         os.makedirs(self.corpus_path, exist_ok=True)
 
-        # --- Configure the embedding model ---
-        embed_config = self.config.get('embedding_settings', {})
-        model_name = embed_config.get('model_name')
-        if not model_name:
-            raise ValueError("Embedding model name not found in config.yaml under 'embedding_settings'.")
+        # --- LAZY LOADING FOR EMBEDDING MODEL ---
+        if _cached_embed_model is None:
+            embed_config = self.config.get('embedding_settings', {})
+            model_name = embed_config.get('model_name')
+            if not model_name:
+                raise ValueError("Embedding model name not found in config.yaml under 'embedding_settings'.")
 
-        click.echo(f"INFO: Loading embedding model '{model_name}'...")
-        # Use the global Settings object to configure the embedding model
-        Settings.embed_model = HuggingFaceEmbedding(model_name=model_name)
+            click.echo(f"INFO: Loading embedding model '{model_name}' for the first time...")
+            _cached_embed_model = HuggingFaceEmbedding(model_name=model_name)
+            Settings.embed_model = _cached_embed_model
+        else:
+            # If already loaded, just ensure it's set in the global settings
+            Settings.embed_model = _cached_embed_model
 
         # --- Configure the LLM ---
         llm_manager = LLMManager(self.config)
@@ -69,7 +81,10 @@ class VectorManager:
         Settings.llm = llm_manager.get_llm('enrichment_model')
 
         # --- Initialize ChromaDB client and LlamaIndex components ---
-        self.client = chromadb.PersistentClient(path=self.chroma_db_path)
+        self.client = chromadb.PersistentClient(
+            path=self.chroma_db_path,
+            settings=ChromaSettings(allow_reset=True)
+        )
         self.collection = self.client.get_or_create_collection("m3_collection")
         self.vector_store = ChromaVectorStore(chroma_collection=self.collection)
         self.storage_context = StorageContext.from_defaults(vector_store=self.vector_store)
@@ -84,6 +99,22 @@ class VectorManager:
     def _save_metadata(self, metadata):
         with open(self.metadata_path, 'w') as f:
             json.dump(metadata, f, indent=4)
+
+    def _find_corpus_file(self, identifier):
+        """Finds a file in the corpus by original filename or UUID-based ID."""
+        metadata = self._load_metadata()
+
+        # First, try to match by the file ID (stem of the path in the corpus)
+        for path, meta in metadata.items():
+            if Path(path).stem == identifier:
+                return path, meta
+
+        # If not found by ID, fall back to matching the original filename
+        for path, meta in metadata.items():
+            if Path(meta.get('original_path', '')).name == identifier:
+                return path, meta
+
+        return None, None
 
     def add_to_corpus(self, paths, doc_type):
         """Copies files to the project's corpus and updates the manifest."""
@@ -136,54 +167,89 @@ class VectorManager:
                 self.index.insert_nodes(processed_data['primary_nodes'])
                 click.echo(f"  > Stored {len(processed_data['primary_nodes'])} nodes in vector store.")
 
-    def remove_from_corpus(self, filename):
-        metadata = self._load_metadata()
-        target_path_in_corpus = None
+    def remove_from_corpus(self, identifier):
+        """Removes a file from the corpus by its original filename or ID."""
+        target_path_in_corpus_str, meta = self._find_corpus_file(identifier)
 
-        # Find the file in the manifest by its original name
-        for path, meta in metadata.items():
-            if Path(meta['original_path']).name == filename:
-                target_path_in_corpus = Path(path)
-                break
+        if not target_path_in_corpus_str:
+            return False, f"File '{identifier}' not found in the corpus."
 
-        if not target_path_in_corpus:
-            return False, f"File '{filename}' not found in the corpus."
+        target_path_in_corpus = Path(target_path_in_corpus_str)
+        original_filename = Path(meta.get('original_path', 'Unknown')).name
 
-        # LlamaIndex's delete_ref_doc is the proper way to remove nodes
-        # It uses the path that was in the document's metadata
-        self.index.delete_ref_doc(str(target_path_in_corpus), delete_from_docstore=True)
+        # --- CORRECTED DELETION LOGIC ---
+        # 1. Get all chunk IDs associated with the file from ChromaDB.
+        chunk_ids_to_delete = self.collection.get(
+            where={"file_path": target_path_in_corpus_str},
+            include=[]
+        ).get('ids', [])
 
-        # Remove the file from the corpus directory
+        # 2. If chunks are found, delete them directly from the collection.
+        if chunk_ids_to_delete:
+            self.collection.delete(ids=chunk_ids_to_delete)
+
+        # 3. Remove the file from the corpus directory
         if target_path_in_corpus.exists():
             target_path_in_corpus.unlink()
 
-        # Remove the entry from the metadata manifest
+        # 4. Remove the entry from the metadata manifest
+        metadata = self._load_metadata()
         del metadata[str(target_path_in_corpus)]
         self._save_metadata(metadata)
 
-        return True, f"'{filename}' and its associated chunks have been removed from the corpus and vector store."
+        return True, f"'{original_filename}' (ID: {target_path_in_corpus.stem}) and its associated chunks have been removed."
 
     def list_corpus(self):
         return self._load_metadata()
 
+    def get_chunk_count(self, doc_id):
+        """Gets the number of chunks for a specific document ID using an efficient query."""
+        if not doc_id:
+            return 0
+
+        # Query ChromaDB directly for the count of items matching the file_path metadata.
+        # This is more efficient than retrieving all node content.
+        result = self.collection.get(where={"file_path": doc_id}, include=[])
+        return len(result.get('ids', []))
+
     def rebuild_vector_store(self):
-        self.create_vector_store(rebuild=True)
+        """Resets the vector store and re-ingests all documents from the corpus."""
+        # --- REFACTORED REBUILD LOGIC ---
+        # 1. Reset the ChromaDB client, clearing all collections.
+        click.echo("  > Resetting vector store...")
+        self.client.reset()
+
+        # 2. Re-create the collection and LlamaIndex components to ensure they are fresh.
+        click.echo("  > Re-initializing collection and index...")
+        self.collection = self.client.get_or_create_collection("m3_collection")
+        self.vector_store = ChromaVectorStore(chroma_collection=self.collection)
+        self.storage_context = StorageContext.from_defaults(vector_store=self.vector_store)
+        self.index = VectorStoreIndex.from_documents([], storage_context=self.storage_context)
+
+        # 3. Load the corpus metadata.
         metadata = self._load_metadata()
         if not metadata:
             click.echo("Corpus is empty. Nothing to rebuild.")
             return
 
+        # 4. Group files by document type for processing.
         all_files_by_type = {}
         for path, meta in metadata.items():
-            doc_type = meta['doc_type']
-            # The path to ingest is the key of the metadata dict (the copied file)
+            doc_type = meta.get('doc_type', 'document')
             if doc_type not in all_files_by_type:
                 all_files_by_type[doc_type] = []
             all_files_by_type[doc_type].append(path)
 
+        # 5. Process each group of files.
         for doc_type, paths in all_files_by_type.items():
             click.echo(f"Processing {len(paths)} file(s) of type '{doc_type}'...")
-            self.add_to_corpus(paths, doc_type)
+            pipeline = get_pipeline('cogarc', self.config)
+            documents = read_files(paths)
+            if documents:
+                processed_data = pipeline.run(documents, doc_type)
+                if 'primary_nodes' in processed_data and processed_data['primary_nodes']:
+                    self.index.insert_nodes(processed_data['primary_nodes'])
+                    click.echo(f"  > Stored {len(processed_data['primary_nodes'])} nodes.")
 
         click.secho("✅ Vector store rebuild complete.", fg="green")
 
@@ -220,30 +286,33 @@ class VectorManager:
         click.echo(f"    - Enrichment Model: {enrich_model_name}")
 
     def create_vector_store(self, rebuild=False):
-        if os.path.exists(self.chroma_db_path):
-            shutil.rmtree(self.chroma_db_path)
-
-        os.makedirs(self.chroma_db_path)
-        self.__init__(self.config)  # Re-initialize to create new client/index
-
-        if not rebuild:
+        """Creates or resets the vector store."""
+        if rebuild:
+            click.echo("  > Resetting vector store...")
+            self.client.reset()
+            # After resetting, re-initialize the core components
+            self.collection = self.client.get_or_create_collection("m3_collection")
+            self.vector_store = ChromaVectorStore(chroma_collection=self.collection)
+            self.storage_context = StorageContext.from_defaults(vector_store=self.vector_store)
+            self.index = VectorStoreIndex.from_documents([], storage_context=self.storage_context)
+        else:
+            if os.path.exists(self.chroma_db_path):
+                shutil.rmtree(self.chroma_db_path)
+            os.makedirs(self.chroma_db_path)
+            # Re-initialize the manager to establish a new client and collection
+            self.__init__(self.config)
             self._save_metadata({})
             click.secho("✅ New blank vector store created.", fg="green")
 
-    def get_file_chunks(self, filename):
-        """Retrieves and displays the text chunks for a specific file."""
-        metadata = self._load_metadata()
-        target_doc_id = None
-
-        # Find the document ID (the path in the corpus) from the manifest
-        for doc_id, meta in metadata.items():
-            if Path(meta.get('original_path', '')).name == filename:
-                target_doc_id = doc_id
-                break
+    def get_file_chunks(self, identifier):
+        """Retrieves and displays text chunks for a file by its original filename or ID."""
+        target_doc_id, meta = self._find_corpus_file(identifier)
 
         if not target_doc_id:
-            click.secho(f"Error: File '{filename}' not found in the corpus manifest.", fg="red")
+            click.secho(f"Error: File '{identifier}' not found in the corpus manifest.", fg="red")
             return
+
+        original_filename = Path(meta.get('original_path', 'Unknown')).name
 
         # Retrieve nodes from the vector store using a filter
         retriever = self.index.as_retriever(
@@ -252,10 +321,10 @@ class VectorManager:
         nodes = retriever.retrieve(" ")  # Use a blank query to get all nodes for the file
 
         if not nodes:
-            click.echo(f"No chunks found for '{filename}'. Has it been ingested?")
+            click.echo(f"No chunks found for '{original_filename}'. Has it been ingested?")
             return
 
-        click.secho(f"\n--- Text Chunks for: {filename} ---", bold=True)
+        click.secho(f"\n--- Text Chunks for: {original_filename} (ID: {Path(target_doc_id).stem}) ---", bold=True)
         for i, node in enumerate(nodes):
             click.secho(f"\n[Chunk {i + 1}]", fg="yellow")
             click.echo(node.get_content())
