@@ -16,7 +16,7 @@ project_settings:
 embedding_settings:
   provider: 'ollama'
   # Change this line to your preferred model
-  model_name: 'jeffh/intfloat-multilingual-e5-large:f16' # <--- YOUR PREFERRED MODEL HERE
+  model_name: 'jeffh/intfloat-multilingual-e5-large' # <--- YOUR PREFERRED MODEL HERE
 
 # ==============================================================================
 # LLM PROVIDER DEFINITIONS

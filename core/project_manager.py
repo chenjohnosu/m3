@@ -20,7 +20,10 @@ class ProjectManager:
         if os.path.exists(project_path):
             return None, f"Project '{project_name}' already exists."
 
-        os.makedirs(project_path)
+        # Create the main project directory and the corpus subdirectory
+        corpus_path = os.path.join(project_path, "corpus")
+        os.makedirs(corpus_path)
+
         self.set_active_project(project_name)
         return project_path, f"Project '{project_name}' initialized and set as active."
 

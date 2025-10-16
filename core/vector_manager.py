@@ -2,10 +2,11 @@ import os
 import json
 import shutil
 import click
+import uuid
+from datetime import datetime, timezone
 
 # LlamaIndex core components
 from llama_index.core import VectorStoreIndex, StorageContext, Settings
-# REVERTED to the correct modern import path
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 import chromadb
@@ -15,6 +16,17 @@ from core.ingestion.pipeline_factory import get_pipeline
 from utils.file_reader import read_files
 from core.project_manager import ProjectManager
 from core.llm_manager import LLMManager
+from pathlib import Path
+
+
+def get_file_hash(file_path):
+    import hashlib
+    """Computes the SHA256 hash of a file."""
+    sha256_hash = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+    return sha256_hash.hexdigest()
 
 
 class VectorManager:
@@ -34,8 +46,12 @@ class VectorManager:
 
         self.project_name = active_project_name
         self.project_path = active_project_path
+        self.corpus_path = os.path.join(self.project_path, "corpus")
         self.metadata_path = os.path.join(self.project_path, 'corpus_metadata.json')
         self.chroma_db_path = os.path.join(self.project_path, "chroma_db")
+
+        # Ensure corpus directory exists
+        os.makedirs(self.corpus_path, exist_ok=True)
 
         # --- Configure the embedding model ---
         embed_config = self.config.get('embedding_settings', {})
@@ -70,39 +86,79 @@ class VectorManager:
             json.dump(metadata, f, indent=4)
 
     def add_to_corpus(self, paths, doc_type):
-        pipeline = get_pipeline('cogarc', self.config)
-        documents = read_files(paths)
-        if not documents:
-            print("No valid documents found.")
-            return
-
-        processed_data = pipeline.run(documents, doc_type)
-
-        if 'primary_nodes' in processed_data and processed_data['primary_nodes']:
-            self.index.insert_nodes(processed_data['primary_nodes'])
-            print(f"  > Stored {len(processed_data['primary_nodes'])} nodes.")
-
+        """Copies files to the project's corpus and updates the manifest."""
         metadata = self._load_metadata()
-        for doc in documents:
-            file_path = doc.metadata.get('file_path', 'Unknown Path')
-            metadata[file_path] = {'doc_type': doc_type}
+        newly_added_files = []
+
+        for path_str in paths:
+            path = Path(path_str)
+            if not path.exists():
+                click.secho(f"  > Warning: Path does not exist: {path_str}", fg="yellow")
+                continue
+
+            files_to_process = [path] if path.is_file() else list(path.rglob('*'))
+
+            for file_path in files_to_process:
+                if not file_path.is_file():
+                    continue
+
+                file_hash = get_file_hash(file_path)
+                file_id = str(uuid.uuid4())
+                destination_path = Path(self.corpus_path) / f"{file_id}{file_path.suffix}"
+
+                # Copy the file to the corpus
+                shutil.copy(file_path, destination_path)
+
+                # Update metadata manifest
+                metadata[str(destination_path)] = {
+                    'original_path': str(file_path),
+                    'doc_type': doc_type,
+                    'hash': file_hash,
+                    'added_at': datetime.now(timezone.utc).isoformat()
+                }
+                newly_added_files.append(str(destination_path))
+                click.echo(f"  > Added '{file_path.name}' to corpus.")
+
         self._save_metadata(metadata)
+
+        # Now, process only the newly added files for ingestion
+        if newly_added_files:
+            pipeline = get_pipeline('cogarc', self.config)
+            # We need to read the *copied* files for ingestion
+            documents = read_files(newly_added_files)
+            if not documents:
+                click.echo("No valid documents found to ingest.")
+                return
+
+            processed_data = pipeline.run(documents, doc_type)
+
+            if 'primary_nodes' in processed_data and processed_data['primary_nodes']:
+                self.index.insert_nodes(processed_data['primary_nodes'])
+                click.echo(f"  > Stored {len(processed_data['primary_nodes'])} nodes in vector store.")
 
     def remove_from_corpus(self, filename):
         metadata = self._load_metadata()
-        target_path = None
-        for path in metadata:
-            if os.path.basename(path) == filename:
-                target_path = path
+        target_path_in_corpus = None
+
+        # Find the file in the manifest by its original name
+        for path, meta in metadata.items():
+            if Path(meta['original_path']).name == filename:
+                target_path_in_corpus = Path(path)
                 break
 
-        if not target_path:
+        if not target_path_in_corpus:
             return False, f"File '{filename}' not found in the corpus."
 
         # LlamaIndex's delete_ref_doc is the proper way to remove nodes
-        self.index.delete_ref_doc(target_path, delete_from_docstore=True)
+        # It uses the path that was in the document's metadata
+        self.index.delete_ref_doc(str(target_path_in_corpus), delete_from_docstore=True)
 
-        del metadata[target_path]
+        # Remove the file from the corpus directory
+        if target_path_in_corpus.exists():
+            target_path_in_corpus.unlink()
+
+        # Remove the entry from the metadata manifest
+        del metadata[str(target_path_in_corpus)]
         self._save_metadata(metadata)
 
         return True, f"'{filename}' and its associated chunks have been removed from the corpus and vector store."
@@ -120,6 +176,7 @@ class VectorManager:
         all_files_by_type = {}
         for path, meta in metadata.items():
             doc_type = meta['doc_type']
+            # The path to ingest is the key of the metadata dict (the copied file)
             if doc_type not in all_files_by_type:
                 all_files_by_type[doc_type] = []
             all_files_by_type[doc_type].append(path)
@@ -174,7 +231,35 @@ class VectorManager:
             click.secho("✅ New blank vector store created.", fg="green")
 
     def get_file_chunks(self, filename):
-        click.echo(f"Retrieving chunks for '{filename}'... (Not yet implemented)")
+        """Retrieves and displays the text chunks for a specific file."""
+        metadata = self._load_metadata()
+        target_doc_id = None
+
+        # Find the document ID (the path in the corpus) from the manifest
+        for doc_id, meta in metadata.items():
+            if Path(meta.get('original_path', '')).name == filename:
+                target_doc_id = doc_id
+                break
+
+        if not target_doc_id:
+            click.secho(f"Error: File '{filename}' not found in the corpus manifest.", fg="red")
+            return
+
+        # Retrieve nodes from the vector store using a filter
+        retriever = self.index.as_retriever(
+            vector_store_kwargs={"where": {"file_path": target_doc_id}}
+        )
+        nodes = retriever.retrieve(" ")  # Use a blank query to get all nodes for the file
+
+        if not nodes:
+            click.echo(f"No chunks found for '{filename}'. Has it been ingested?")
+            return
+
+        click.secho(f"\n--- Text Chunks for: {filename} ---", bold=True)
+        for i, node in enumerate(nodes):
+            click.secho(f"\n[Chunk {i + 1}]", fg="yellow")
+            click.echo(node.get_content())
+        click.secho("\n--- End of Chunks ---", bold=True)
 
     def query_vector_store(self, query_text):
         click.echo(f"Querying project '{self.project_name}' for: '{query_text}'")
