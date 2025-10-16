@@ -22,7 +22,7 @@ setup(
         'click',
         'llama-index',
         'llama-index-llms-ollama',
-        'llama-index-embeddings-ollama',
+        'llama-index-embeddings-huggingface',  # Corrected from -ollama
         'llama-index-vector-stores-chroma',
         'chromadb',
         'PyYAML'  # Add PyYAML for YAML file handling

@@ -2,12 +2,19 @@ import os
 import json
 import shutil
 import click
+
+# LlamaIndex core components
+from llama_index.core import VectorStoreIndex, StorageContext, Settings
+# REVERTED to the correct modern import path
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from llama_index.vector_stores.chroma import ChromaVectorStore
+import chromadb
+
+# Project-specific components
 from core.ingestion.pipeline_factory import get_pipeline
 from utils.file_reader import read_files
 from core.project_manager import ProjectManager
-import chromadb
-from llama_index.vector_stores.chroma import ChromaVectorStore
-from llama_index.core import VectorStoreIndex, StorageContext
+from core.llm_manager import LLMManager
 
 
 class VectorManager:
@@ -29,6 +36,21 @@ class VectorManager:
         self.project_path = active_project_path
         self.metadata_path = os.path.join(self.project_path, 'corpus_metadata.json')
         self.chroma_db_path = os.path.join(self.project_path, "chroma_db")
+
+        # --- Configure the embedding model ---
+        embed_config = self.config.get('embedding_settings', {})
+        model_name = embed_config.get('model_name')
+        if not model_name:
+            raise ValueError("Embedding model name not found in config.yaml under 'embedding_settings'.")
+
+        click.echo(f"INFO: Loading embedding model '{model_name}'...")
+        # Use the global Settings object to configure the embedding model
+        Settings.embed_model = HuggingFaceEmbedding(model_name=model_name)
+
+        # --- Configure the LLM ---
+        llm_manager = LLMManager(self.config)
+        # Use a default LLM from your config (e.g., enrichment_model) for non-pipeline tasks
+        Settings.llm = llm_manager.get_llm('enrichment_model')
 
         # --- Initialize ChromaDB client and LlamaIndex components ---
         self.client = chromadb.PersistentClient(path=self.chroma_db_path)

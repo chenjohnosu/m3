@@ -1,5 +1,6 @@
 import yaml
 import os
+import shutil
 
 _config = None
 
@@ -12,42 +13,52 @@ def get_config_path():
     return os.path.join(get_config_dir(), "config.yaml")
 
 def create_default_config_if_not_exists():
-    """Creates a default config.yaml if it doesn't already exist."""
+    """Creates a default config.yaml by copying from the project root if it doesn't exist."""
     config_path = get_config_path()
     if not os.path.exists(config_path):
         print("No config.yaml found. Creating a default one in ~/.monkey3/")
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
-        default_config = {
-            'project_settings': {
-                'projects_directory': '~/.monkey3/projects'
-            },
-            'llm_providers': {
-                'ollama_client': {
-                    'provider': 'ollama',
-                    'base_url': 'http://localhost:11434',
-                    'models': {
-                        'synthesis_model': {'model_name': 'llama3', 'request_timeout': 120.0},
-                        'enrichment_model': {'model_name': 'mistral', 'request_timeout': 60.0}
+
+        # Path to the config.yaml in the project's root directory
+        source_config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'config.yaml'))
+
+        if os.path.exists(source_config_path):
+            shutil.copy(source_config_path, config_path)
+            print(f"Default config copied to: {config_path}")
+        else:
+            # Fallback to creating a default config if the source file is not found
+            print("Source config.yaml not found, creating a default one.")
+            default_config = {
+                'project_settings': {
+                    'projects_directory': '~/.monkey3/projects'
+                },
+                'llm_providers': {
+                    'ollama_client': {
+                        'provider': 'ollama',
+                        'base_url': 'http://localhost:11434',
+                        'models': {
+                            'synthesis_model': {'model_name': 'llama3', 'request_timeout': 120.0},
+                            'enrichment_model': {'model_name': 'mistral', 'request_timeout': 60.0}
+                        }
+                    }
+                },
+                'ingestion_config': {
+                    'known_doc_types': [
+                        'document', 'interview', 'paper', 'data',
+                        'observation', 'ethnographic_notes'
+                    ],
+                    'default_doc_type': 'document',
+                    'cogarc_settings': {
+                        'stage_0_model': 'synthesis_model',
+                        'stage_1_model': 'synthesis_model',
+                        'stage_2_model': 'enrichment_model',
+                        'stage_3_model': 'synthesis_model'
                     }
                 }
-            },
-            'ingestion_config': {
-                'known_doc_types': [
-                    'document', 'interview', 'paper', 'data',
-                    'observation', 'ethnographic_notes'
-                ],
-                'default_doc_type': 'document',
-                'cogarc_settings': {
-                    'stage_0_model': 'synthesis_model',
-                    'stage_1_model': 'synthesis_model',
-                    'stage_2_model': 'enrichment_model',
-                    'stage_3_model': 'synthesis_model'
-                }
             }
-        }
-        with open(config_path, 'w') as f:
-            yaml.dump(default_config, f, sort_keys=False)
-        print(f"Default config created at: {config_path}")
+            with open(config_path, 'w') as f:
+                yaml.dump(default_config, f, sort_keys=False)
+            print(f"Default config created at: {config_path}")
 
 def get_config():
     """Loads and returns the configuration from ~/.monkey3/config.yaml."""

@@ -38,22 +38,25 @@ def show_interactive_help():
     click.echo("  /quit     - Exit interactive mode")
 
 
-def show_subcommand_help(command_name):
-    """Displays a clean list of subcommands for a given command."""
-    cmd_obj = cli.get_command(click.Context(cli), command_name)
-    if not cmd_obj:
-        return
+def show_subcommand_help(command_path):
+    """Displays the help message for a given command or subcommand."""
+    args = command_path.split()
+    cmd_obj = cli
+    ctx = click.Context(cli)
+    for arg in args:
+        if isinstance(cmd_obj, click.Group):
+            # Attempt to get the subcommand
+            cmd_obj = cmd_obj.get_command(ctx, arg)
+            if cmd_obj is None:
+                click.echo(f"Error: No such command '{arg}'")
+                return
+            ctx = click.Context(cmd_obj, info_name=arg, parent=ctx)
+        else:
+            click.echo(f"Error: '{ctx.command.name}' does not have subcommands.")
+            return
 
-    click.echo(f"Commands for /{command_name}:")
-    commands = []
-    for subcommand in cmd_obj.list_commands(click.Context(cmd_obj)):
-        sub_cmd = cmd_obj.get_command(click.Context(cmd_obj), subcommand)
-        if sub_cmd and not sub_cmd.hidden:
-            commands.append((subcommand, sub_cmd.get_short_help_str()))
-
-    formatter = click.formatting.HelpFormatter()
-    formatter.write_dl(commands)
-    click.echo(formatter.getvalue(), nl=False)
+    if cmd_obj:
+        click.echo(cmd_obj.get_help(ctx))
 
 
 def interactive_mode():
@@ -99,7 +102,9 @@ def interactive_mode():
                 show_interactive_help()
                 continue
 
-            if len(args) == 1:
+            # If a group command is entered without a subcommand, show its help.
+            cmd_obj = cli.get_command(click.Context(cli), cmd)
+            if isinstance(cmd_obj, click.Group) and len(args) == 1:
                 show_subcommand_help(cmd)
                 continue
 
@@ -110,6 +115,8 @@ def interactive_mode():
             break
         except click.exceptions.UsageError as e:
             click.echo(f"Error: {e.format_message()}", err=True)
+            # When a usage error occurs, show the help for the command that was attempted.
+            show_subcommand_help(" ".join(args))
         except Exception as e:
             click.echo(f"An unexpected error occurred: {e}", err=True)
 
