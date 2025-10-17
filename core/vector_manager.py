@@ -18,6 +18,8 @@ from utils.file_reader import read_files
 from core.project_manager import ProjectManager
 from core.llm_manager import LLMManager
 from pathlib import Path
+# Import the pipeline factory to get the correct pipeline
+from core.ingestion.pipeline_factory import get_pipeline
 
 # --- CACHE FOR LAZY LOADING ---
 _cached_embed_model = None
@@ -92,7 +94,7 @@ class VectorManager:
         return None, None
 
     def _process_and_ingest_file(self, file_path_in_corpus, doc_type):
-        """Processes a single file and ingests it into the vector store."""
+        """Processes a single file using the Cognitive Architect Pipeline."""
         click.echo(f"\n--- Processing '{Path(file_path_in_corpus).name}' (Type: {doc_type}) ---")
 
         documents = read_files([file_path_in_corpus])
@@ -100,17 +102,20 @@ class VectorManager:
             click.secho("  > Failed to read document.", fg="yellow")
             return
 
-        if doc_type == 'interview':
-            click.echo("  > Running Stage 0: Q&A Stratification (Placeholder)...")
+        # --- CORRECTED PIPELINE INTEGRATION ---
+        # Get the fully implemented Cognitive Architect Pipeline.
+        pipeline = get_pipeline('cogarc', self.config)
 
-        click.echo("  > Running Stage 2: Chunking...")
-        splitter = SentenceSplitter(chunk_size=512, chunk_overlap=100)
-        nodes = splitter.get_nodes_from_documents(documents)
-        click.echo(f"  > Generated {len(nodes)} text chunks.")
+        # Run the document through the entire pipeline.
+        processed_data = pipeline.run(documents, doc_type)
+
+        nodes = processed_data.get('primary_nodes', [])
 
         if nodes:
             self.index.insert_nodes(nodes)
             click.echo(f"  > Stored {len(nodes)} chunks in the vector store.")
+        else:
+            click.secho("  > No chunks were generated from the document.", fg="yellow")
 
         click.echo("--- Finished Processing ---")
 
@@ -223,29 +228,28 @@ class VectorManager:
             click.secho("✅ New blank vector store created.", fg="green")
 
     def get_file_chunks(self, identifier):
-        """Retrieves and displays text chunks for a file by its original filename or ID."""
         target_doc_id, meta = self._find_corpus_file(identifier)
         if not target_doc_id:
             click.secho(f"Error: File '{identifier}' not found in the corpus manifest.", fg="red")
             return
         original_filename = Path(meta.get('original_path', 'Unknown')).name
 
-        # --- CORRECTED RETRIEVAL LOGIC ---
-        # Directly query ChromaDB for all chunks associated with the file_path.
-        # This is the most efficient and scalable method for this diagnostic function.
         results = self.collection.get(
             where={"file_path": target_doc_id},
-            include=["documents"]  # Only fetch the document content
+            include=["documents", "metadatas"]
         )
 
-        documents = results.get('documents')
-        if not documents:
+        items = list(zip(results.get('documents', []), results.get('metadatas', [])))
+        if not items:
             click.echo(f"No chunks found for '{original_filename}'. Has it been ingested?")
             return
 
         click.secho(f"\n--- Text Chunks for: {original_filename} (ID: {Path(target_doc_id).stem}) ---", bold=True)
-        for i, doc_content in enumerate(documents):
+        for i, (doc_content, doc_meta) in enumerate(items):
             click.secho(f"\n[Chunk {i + 1}]", fg="yellow")
+            # Display the question from the metadata, if it exists
+            if 'question' in doc_meta:
+                click.secho(f"  Question: {doc_meta['question']}", fg="cyan")
             click.echo(doc_content)
         click.secho("\n--- End of Chunks ---", bold=True)
 

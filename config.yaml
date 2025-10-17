@@ -29,7 +29,7 @@ llm_providers:
     models:
       # A powerful model for complex reasoning (e.g., llama3, mixtral)
       synthesis_model:
-        model_name: 'mixtral'
+        model_name: 'mistral'
         request_timeout: 120.0
       # A fast model for routine tasks (e.g., mistral, llama3:8b)
       enrichment_model:
