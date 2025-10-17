@@ -227,7 +227,7 @@ class VectorManager:
             self._save_metadata({})
             click.secho("✅ New blank vector store created.", fg="green")
 
-    def get_file_chunks(self, identifier):
+    def get_file_chunks(self, identifier, include_metadata=False):
         target_doc_id, meta = self._find_corpus_file(identifier)
         if not target_doc_id:
             click.secho(f"Error: File '{identifier}' not found in the corpus manifest.", fg="red")
@@ -247,9 +247,16 @@ class VectorManager:
         click.secho(f"\n--- Text Chunks for: {original_filename} (ID: {Path(target_doc_id).stem}) ---", bold=True)
         for i, (doc_content, doc_meta) in enumerate(items):
             click.secho(f"\n[Chunk {i + 1}]", fg="yellow")
-            # Display the question from the metadata, if it exists
-            if 'question' in doc_meta:
-                click.secho(f"  Question: {doc_meta['question']}", fg="cyan")
+
+            # --- METADATA DISPLAY LOGIC ---
+            if include_metadata and doc_meta:
+                click.secho("  Metadata:", underline=True)
+                for key, value in doc_meta.items():
+                    # Don't display the full file_path in every chunk
+                    if key != 'file_path':
+                        click.echo(f"    - {key}: ", nl=False)
+                        click.secho(f"{value}", fg="cyan")
+
             click.echo(doc_content)
         click.secho("\n--- End of Chunks ---", bold=True)
 
