@@ -28,23 +28,25 @@ class CognitiveArchitectPipeline(BasePipeline):
 
     def run(self, documents, doc_type):
         print(f"\n--- Starting Cognitive Architect Pipeline for doc_type: '{doc_type}' ---")
-        pipeline_data = {'documents': documents, 'questions': []}
+
+        # Start with the initial documents
+        pipeline_data = {'documents': documents}
 
         if doc_type == 'interview':
+            # Stage 0 is a placeholder, for now, it just passes the documents through
             pipeline_data = self.stage_0.process(pipeline_data)
-            # After stage 0, the documents are in 'answers'. Move them to 'documents' for the next stages.
-            if 'answers' in pipeline_data:
-                pipeline_data['documents'] = pipeline_data.pop('answers')
         else:
             print("Skipping Stage 0 (Q&A Stratification) for non-interview document.")
 
         if not pipeline_data.get('documents'):
             print("No content available for further processing.")
-            return pipeline_data
+            return {}
 
-        pipeline_data = self.stage_1.process(pipeline_data)
-        pipeline_data = self.stage_2.process(pipeline_data)
-        pipeline_data = self.stage_3.process(pipeline_data)
+        # The output of one stage becomes the input for the next
+        structured_data = self.stage_1.process(pipeline_data)
+        enriched_data = self.stage_2.process(structured_data)
+        synthesized_data = self.stage_3.process(enriched_data)
 
         print("--- Cognitive Architect Pipeline Finished ---")
-        return pipeline_data
+        # Return the final data which contains the 'primary_nodes'
+        return synthesized_data
