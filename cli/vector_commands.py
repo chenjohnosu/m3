@@ -37,7 +37,7 @@ def chunks(identifier):
         # For this example, we assume we need to modify the VectorManager or
         # that the get_file_chunks function will be updated to show metadata.
         # Let's update the call here to reflect the change to print metadata.
-        manager.get_file_chunks(identifier, include_metadata=True)
+        manager.get_file_chunks(identifier, True)
 
     except Exception as e:
         click.secho(f"🔥 Error: {e}", fg="red")
