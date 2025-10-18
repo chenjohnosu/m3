@@ -3,6 +3,7 @@ import json
 import shutil
 import click
 import uuid
+import textwrap  # Added textwrap
 from datetime import datetime, timezone
 
 # LlamaIndex core components
@@ -227,7 +228,7 @@ class VectorManager:
             self._save_metadata({})
             click.secho("✅ New blank vector store created.", fg="green")
 
-    def get_file_chunks(self, identifier, include_metadata=False):
+    def get_file_chunks(self, identifier, include_metadata=False, pretty=False):
         target_doc_id, meta = self._find_corpus_file(identifier)
         if not target_doc_id:
             click.secho(f"Error: File '{identifier}' not found in the corpus manifest.", fg="red")
@@ -245,19 +246,59 @@ class VectorManager:
             return
 
         click.secho(f"\n--- Text Chunks for: {original_filename} (ID: {Path(target_doc_id).stem}) ---", bold=True)
+
+        # --- NEW: Define the *only* metadata keys we want to show ---
+        human_readable_metadata_keys = [
+            'original_filename',
+            'question',
+            'themes',
+            'hypothetical_question',
+            'holistic_summary'
+        ]
+
         for i, (doc_content, doc_meta) in enumerate(items):
             click.secho(f"\n[Chunk {i + 1}]", fg="yellow")
 
-            # --- METADATA DISPLAY LOGIC ---
-            if include_metadata and doc_meta:
-                click.secho("  Metadata:", underline=True)
-                for key, value in doc_meta.items():
-                    # Don't display the full file_path in every chunk
-                    if key != 'file_path':
-                        click.echo(f"    - {key}: ", nl=False)
-                        click.secho(f"{value}", fg="cyan")
+            # Filter the metadata to only include keys we care about
+            keys_to_print = [k for k in doc_meta.keys() if k in human_readable_metadata_keys]
 
-            click.echo(doc_content)
+            if pretty:
+                # --- PRETTY-PRINT METADATA ---
+                click.secho("  Metadata:", underline=True)
+                if keys_to_print:
+                    max_key_len = max(len(key) for key in keys_to_print)
+                    for key in sorted(keys_to_print):
+                        value = doc_meta.get(key, "N/A")  # Use .get() for safety
+                        value_lines = str(value).split('\n')
+                        click.echo(f"    - {key:<{max_key_len}} : ", nl=False)
+                        click.secho(f"{value_lines[0]}", fg="cyan")
+                        for line in value_lines[1:]:
+                            click.secho(f"{' ' * (max_key_len + 9)}{line}", fg="cyan")
+                else:
+                    click.echo("    No human-readable metadata found for this chunk.")
+
+                # --- PRETTY-PRINT CONTENT ---
+                click.secho("  Content:", underline=True)
+                content_indent = "    "
+                wrapped_content = textwrap.fill(
+                    doc_content,
+                    width=90,
+                    initial_indent=content_indent,
+                    subsequent_indent=content_indent
+                )
+                click.echo(wrapped_content)
+
+            else:
+                # --- NON-PRETTY (ORIGINAL) LOGIC, NOW WITH FILTERING ---
+                if include_metadata and keys_to_print:
+                    click.secho("  Metadata:", underline=True)
+                    for key in sorted(keys_to_print):
+                        click.echo(f"    - {key}: ", nl=False)
+                        click.secho(f"{doc_meta[key]}", fg="cyan")
+
+                # Print raw content
+                click.echo(doc_content)
+
         click.secho("\n--- End of Chunks ---", bold=True)
 
     def query_vector_store(self, query_text):

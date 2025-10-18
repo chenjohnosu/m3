@@ -30,12 +30,12 @@ def cli(ctx, go, batch_file):
 def show_interactive_help():
     """Displays the help message for interactive mode."""
     click.echo("Available commands:")
-    click.echo("  /project  - Manage projects")
-    click.echo("  /corpus   - Manage a project's corpus")
-    click.echo("  /vector   - Manage a project's vector store")
-    click.echo("  /analyze  - Analyze project data")
-    click.echo("  /help     - Show this help message")
-    click.echo("  /quit     - Exit interactive mode")
+    click.echo("  /project  (alias: /p) - Manage projects")
+    click.echo("  /corpus   (alias: /c) - Manage a project's corpus")
+    click.echo("  /vector   (alias: /v) - Manage a project's vector store")
+    click.echo("  /analyze              - Analyze project data")
+    click.echo("  /help                 - Show this help message")
+    click.echo("  /quit     (alias: /q) - Exit interactive mode")
 
 
 def show_subcommand_help(command_path):
@@ -61,10 +61,19 @@ def show_subcommand_help(command_path):
 
 def interactive_mode():
     """Starts a clean, simplified interactive REPL session."""
-    click.echo("Entering interactive mode. Use '/quit' to exit.")
+    click.echo("Entering interactive mode. Use '/quit' or '/q' to exit.")
 
     # Instantiate the ProjectManager once to use in the loop
     project_manager = ProjectManager()
+
+    # --- NEW: Alias mapping ---
+    command_aliases = {
+        'c': 'corpus',
+        'p': 'project',
+        'v': 'vector',
+        'q': 'quit',
+        # 'a': 'analyze' # You can uncomment this if you want '/a' for analyze
+    }
 
     while True:
         # Get the active project using the manager
@@ -88,6 +97,11 @@ def interactive_mode():
                 continue
 
             cmd = args[0].lower()
+
+            # --- NEW: Resolve alias ---
+            if cmd in command_aliases:
+                cmd = command_aliases[cmd]
+                args[0] = cmd  # Update the args list with the resolved command
 
             if cmd == 'quit':
                 break

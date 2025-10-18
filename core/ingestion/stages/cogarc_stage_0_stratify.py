@@ -35,8 +35,11 @@ class CogArcStage0Stratify(BaseStage):
                     ChatMessage(role="user", content=doc.text)
                 ]
 
+                # Get the original_filename from metadata (which was injected by VectorManager)
+                doc_display_name = doc.metadata.get('original_filename', doc.metadata.get('file_name', 'Unknown'))
+
                 click.echo(
-                    f"  > Sending '{doc.metadata.get('file_name')}' to LLM for analysis. This may take a moment...")
+                    f"  > Sending '{doc_display_name}' to LLM for analysis. This may take a moment...")
 
                 response = self.llm.chat(messages)
                 response_text = response.message.content
@@ -57,13 +60,21 @@ class CogArcStage0Stratify(BaseStage):
                     answer = pair.get("answer")
 
                     if question and answer:
+                        # --- THIS IS THE FIX ---
+                        # 1. Create a deep copy of the parent document's metadata.
+                        #    This preserves 'original_filename' and any other metadata.
+                        new_metadata = doc.metadata.copy()
+
+                        # 2. Update the metadata with new/changed values for this chunk.
+                        new_metadata["question"] = question
+
+                        # 3. Ensure 'original_filename' is set to the correct display name
+                        #    (in case the parent doc's key was just 'file_name')
+                        new_metadata["original_filename"] = doc_display_name
+
                         answer_doc = Document(
                             text=answer,
-                            metadata={
-                                "file_path": doc.metadata.get("file_path"),
-                                "original_filename": doc.metadata.get("file_name", "Unknown"),
-                                "question": question
-                            }
+                            metadata=new_metadata  # Use the new, copied metadata
                         )
                         processed_documents.append(answer_doc)
                         canonical_questions.add(question)
@@ -79,8 +90,9 @@ class CogArcStage0Stratify(BaseStage):
             except (json.JSONDecodeError, ValueError, Exception) as e:
                 # --- FALLBACK LOGIC ---
                 # If any error occurs during stratification, treat it as a regular document.
-                click.secho(f"  > Warning: Failed to stratify '{doc.metadata.get('file_name')}'. Reason: {e}",
-                            fg="yellow")
+                click.secho(
+                    f"  > Warning: Failed to stratify '{doc.metadata.get('original_filename', 'Unknown')}'. Reason: {e}",
+                    fg="yellow")
                 click.secho(f"  > Fallback: Treating as a standard document and passing to the next stage.",
                             fg="yellow")
                 processed_documents.append(doc)  # Add the original document to the list

@@ -28,16 +28,14 @@ def create():
 
 @vector.command('chunks')
 @click.argument('identifier')
-def chunks(identifier):
+@click.option('--pretty', is_flag=True, help='Pretty-print chunk metadata as a table.')
+def chunks(identifier, pretty):
     """Retrieves and displays text chunks and their metadata for a file."""
     try:
         manager = VectorManager()
-        # This function in the manager now needs to be updated to return the data
-        # instead of printing it directly, or we can just call it as is if it prints.
-        # For this example, we assume we need to modify the VectorManager or
-        # that the get_file_chunks function will be updated to show metadata.
-        # Let's update the call here to reflect the change to print metadata.
-        manager.get_file_chunks(identifier, True)
+        # Pass the new 'pretty' flag to the manager.
+        # We still pass include_metadata=True for the default (non-pretty) view.
+        manager.get_file_chunks(identifier, include_metadata=True, pretty=pretty)
 
     except Exception as e:
         click.secho(f"🔥 Error: {e}", fg="red")
