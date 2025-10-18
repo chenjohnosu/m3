@@ -6,17 +6,21 @@ import json
 import re
 
 # A system prompt designed to generate a concise, relevant question for a chunk of text.
+# --- UPDATED: Removed all examples to prevent "prompt bleed" ---
 SYSTEM_PROMPT = """
 You are an expert in synthesizing information. Your task is to read the following text chunk and generate a single, concise, and relevant question that this text could answer.
 The question should be a natural-language query that a user might ask to find this specific information.
 
-Example Text: "The process for rebuilding the vector store involves first resetting the ChromaDB client, then re-initializing the collection and index. Finally, it iterates through the corpus manifest and re-ingests each file."
-Example Question: "What are the steps to rebuild the vector store?"
+---
+IMPORTANT RULES:
+1.  Your output MUST be only the question itself.
+2.  Do NOT include any preamble like "Here is the question:".
+3.  Do NOT copy any part of this system prompt.
+4.  Generate ONE question ONLY.
+5.  The output must be a single string, not a JSON object.
+---
 
-Important Rules:
--   Generate only the question itself.
--   Do not include any preamble like "Here is the question:".
--   Ensure the output is just a single string, not a JSON object.
+Read the text below and provide only the question.
 """
 
 
