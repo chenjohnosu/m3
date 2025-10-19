@@ -2,8 +2,7 @@ import click
 from core.ingestion.stages.base_stage import BaseStage
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.llms import ChatMessage
-import json
-import re
+
 
 # A system prompt designed to generate a concise, relevant question for a chunk of text.
 # --- UPDATED: Removed all examples to prevent "prompt bleed" ---

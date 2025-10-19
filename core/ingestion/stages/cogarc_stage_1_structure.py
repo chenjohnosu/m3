@@ -20,6 +20,7 @@ Important Rules:
 -   Ensure the final output is only the JSON array, with no explanations or conversational text.
 """
 
+
 class CogArcStage1Structure(BaseStage):
     def process(self, data):
         print(f"Executing CogArc Stage 1: Thematic Scaffolding using LLM: {self.llm.model}")
@@ -33,7 +34,15 @@ class CogArcStage1Structure(BaseStage):
             try:
                 # Avoid processing very short texts that likely lack thematic depth.
                 if len(doc.text.split()) < 25:
-                    click.echo(f"  > Skipping thematic analysis for short text chunk from '{doc.metadata.get('original_filename', 'Unknown')}'.")
+                    # --- THIS IS THE FIX ---
+                    # Clean up the text for a single-line log message
+                    cleaned_text = doc.text.replace('\n', ' ').strip()
+                    click.secho(
+                        f"  > Skipping thematic analysis for short text chunk from '{doc.metadata.get('original_filename', 'Unknown')}'.",
+                        fg="yellow")
+                    click.secho(f"    > Skipped Text: \"{cleaned_text}\"", fg="yellow")
+                    # --- END OF FIX ---
+
                     structured_docs.append(doc)
                     continue
 
@@ -76,4 +85,3 @@ class CogArcStage1Structure(BaseStage):
         data['documents'] = structured_docs
         print(f"  > Completed thematic analysis for {len(docs_to_process)} documents.")
         return data
-
