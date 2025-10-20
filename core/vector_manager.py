@@ -3,31 +3,31 @@ import json
 import shutil
 import click
 import uuid
-import textwrap  # Added textwrap
+import textwrap
 from datetime import datetime, timezone
+from pathlib import Path
+import hashlib
 
 # LlamaIndex core components
 from llama_index.core import VectorStoreIndex, StorageContext, Settings
-from llama_index.core.node_parser import SentenceSplitter
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 import chromadb
-from chromadb.config import Settings as ChromaSettings
 
 # Project-specific components
 from utils.file_reader import read_files
 from core.project_manager import ProjectManager
 from core.llm_manager import LLMManager
-from pathlib import Path
-# Import the pipeline factory to get the correct pipeline
 from core.ingestion.pipeline_factory import get_pipeline
+from core.db_manager import get_embed_model, get_chroma_client
 
-# --- CACHE FOR LAZY LOADING ---
-_cached_embed_model = None
+# E5 models expect cosine similarity
+CHROMA_METADATA = {"hnsw:space": "cosine"}
+# Define metadata keys to HIDE by default
+METADATA_TO_HIDE_DEFAULT = ['holistic_summary', 'original_filename', 'file_path', 'original_text']
 
 
 def get_file_hash(file_path):
-    import hashlib
     sha256_hash = hashlib.sha256()
     with open(file_path, "rb") as f:
         for byte_block in iter(lambda: f.read(4096), b""):
@@ -37,7 +37,6 @@ def get_file_hash(file_path):
 
 class VectorManager:
     def __init__(self, config=None):
-        global _cached_embed_model
         from utils.config import get_config
         self.config = config or get_config()
         self.project_manager = ProjectManager()
@@ -54,27 +53,27 @@ class VectorManager:
 
         os.makedirs(self.corpus_path, exist_ok=True)
 
-        if _cached_embed_model is None:
-            embed_config = self.config.get('embedding_settings', {})
-            model_name = embed_config.get('model_name')
-            if not model_name:
-                raise ValueError("Embedding model name not found in config.yaml.")
-            click.echo(f"INFO: Loading embedding model '{model_name}' for the first time...")
-            _cached_embed_model = HuggingFaceEmbedding(model_name=model_name)
-            Settings.embed_model = _cached_embed_model
-        else:
-            Settings.embed_model = _cached_embed_model
+        # --- Use db_manager ---
+        embed_config = self.config.get('embedding_settings', {})
+        model_name = embed_config.get('model_name')
+        if not model_name:
+            raise ValueError("Embedding model name not found in config.yaml.")
+
+        get_embed_model(model_name)
 
         llm_manager = LLMManager(self.config)
         Settings.llm = llm_manager.get_llm('enrichment_model')
 
-        self.client = chromadb.PersistentClient(
-            path=self.chroma_db_path,
-            settings=ChromaSettings(allow_reset=True)
+        self.client = get_chroma_client(self.chroma_db_path)
+
+        self.collection = self.client.get_or_create_collection(
+            name="m3_collection",
+            metadata=CHROMA_METADATA
         )
-        self.collection = self.client.get_or_create_collection("m3_collection")
+
         self.vector_store = ChromaVectorStore(chroma_collection=self.collection)
         self.storage_context = StorageContext.from_defaults(vector_store=self.vector_store)
+
         self.index = VectorStoreIndex.from_documents([], storage_context=self.storage_context)
 
     def _load_metadata(self):
@@ -103,13 +102,8 @@ class VectorManager:
             click.secho("  > Failed to read document.", fg="yellow")
             return
 
-        # --- CORRECTED PIPELINE INTEGRATION ---
-        # Get the fully implemented Cognitive Architect Pipeline.
         pipeline = get_pipeline('cogarc', self.config)
-
-        # Run the document through the entire pipeline.
         processed_data = pipeline.run(documents, doc_type)
-
         nodes = processed_data.get('primary_nodes', [])
 
         if nodes:
@@ -177,10 +171,14 @@ class VectorManager:
         click.echo("  > Resetting vector store...")
         self.client.reset()
         click.echo("  > Re-initializing collection and index...")
-        self.collection = self.client.get_or_create_collection("m3_collection")
+        self.collection = self.client.get_or_create_collection(
+            name="m3_collection",
+            metadata=CHROMA_METADATA
+        )
         self.vector_store = ChromaVectorStore(chroma_collection=self.collection)
         self.storage_context = StorageContext.from_defaults(vector_store=self.vector_store)
         self.index = VectorStoreIndex.from_documents([], storage_context=self.storage_context)
+
         metadata = self._load_metadata()
         if not metadata:
             click.echo("Corpus is empty. Nothing to rebuild.")
@@ -188,13 +186,23 @@ class VectorManager:
         click.echo(f"Found {len(metadata)} files in the corpus to rebuild.")
         for path, meta in metadata.items():
             self._process_and_ingest_file(path, meta.get('doc_type', 'document'))
+
         click.secho("\n✅ Vector store rebuild complete.", fg="green")
 
     def get_vector_store_status(self):
         click.echo(f"Vector Store Status for Project: '{self.project_name}'")
         click.echo(f"  - Location: {self.chroma_db_path}")
-        count = self.collection.count()
-        click.echo(f"  - Indexed Chunks: {count}")
+        try:
+            collection_metadata = self.collection.metadata
+            metric = collection_metadata.get("hnsw:space", "N/A")
+            click.echo(f"  - Distance Metric: {metric}")
+
+            count = self.collection.count()
+            click.echo(f"  - Indexed Chunks: {count}")
+        except Exception as e:
+            click.secho(f"🔥 Could not retrieve vector store status: {e}", fg="red")
+            return
+
         ingestion_conf = self.config.get('ingestion_config', {})
         cogarc_settings = ingestion_conf.get('cogarc_settings', {})
         llm_providers = self.config.get('llm_providers', {})
@@ -214,12 +222,7 @@ class VectorManager:
 
     def create_vector_store(self, rebuild=False):
         if rebuild:
-            click.echo("  > Resetting vector store...")
-            self.client.reset()
-            self.collection = self.client.get_or_create_collection("m3_collection")
-            self.vector_store = ChromaVectorStore(chroma_collection=self.collection)
-            self.storage_context = StorageContext.from_defaults(vector_store=self.vector_store)
-            self.index = VectorStoreIndex.from_documents([], storage_context=self.storage_context)
+            self.rebuild_vector_store()
         else:
             if os.path.exists(self.chroma_db_path):
                 shutil.rmtree(self.chroma_db_path)
@@ -228,7 +231,7 @@ class VectorManager:
             self._save_metadata({})
             click.secho("✅ New blank vector store created.", fg="green")
 
-    def get_file_chunks(self, identifier, include_metadata=False, pretty=False):
+    def get_file_chunks(self, identifier, include_metadata=False, pretty=False, show_summary=False):
         target_doc_id, meta = self._find_corpus_file(identifier)
         if not target_doc_id:
             click.secho(f"Error: File '{identifier}' not found in the corpus manifest.", fg="red")
@@ -247,59 +250,88 @@ class VectorManager:
 
         click.secho(f"\n--- Text Chunks for: {original_filename} (ID: {Path(target_doc_id).stem}) ---", bold=True)
 
-        # --- NEW: Define the *only* metadata keys we want to show ---
-        human_readable_metadata_keys = [
-            'original_filename',
-            'question',
-            'themes',
-            'hypothetical_question',
-            'holistic_summary'
-        ]
-
         for i, (doc_content, doc_meta) in enumerate(items):
             click.secho(f"\n[Chunk {i + 1}]", fg="yellow")
 
-            # Filter the metadata to only include keys we care about
-            keys_to_print = [k for k in doc_meta.keys() if k in human_readable_metadata_keys]
+            # Get ALL metadata keys
+            all_keys = list(doc_meta.keys())
+
+            # Define keys to ALWAYS hide (internal stuff)
+            keys_to_hide = ['original_filename', 'file_path', 'original_text']
+
+            # Conditionally HIDE the summary
+            if not show_summary:
+                keys_to_hide.append('holistic_summary')
+
+            # Filter the list
+            keys_to_print = [k for k in all_keys if k not in keys_to_hide]
+
+            # --- THIS IS THE FIX ---
+            # Determine if we should print metadata based on flags
+            should_print_metadata = (pretty or include_metadata) and keys_to_print
 
             if pretty:
-                # --- PRETTY-PRINT METADATA ---
                 click.secho("  Metadata:", underline=True)
-                if keys_to_print:
-                    max_key_len = max(len(key) for key in keys_to_print)
+                if should_print_metadata:
+                    max_key_len = max(len(key) for key in keys_to_print) if keys_to_print else 0
                     for key in sorted(keys_to_print):
-                        value = doc_meta.get(key, "N/A")  # Use .get() for safety
+                        value = doc_meta.get(key, "N/A")
                         value_lines = str(value).split('\n')
                         click.echo(f"    - {key:<{max_key_len}} : ", nl=False)
                         click.secho(f"{value_lines[0]}", fg="cyan")
                         for line in value_lines[1:]:
                             click.secho(f"{' ' * (max_key_len + 9)}{line}", fg="cyan")
                 else:
-                    click.echo("    No human-readable metadata found for this chunk.")
+                    click.echo("    No metadata to display for this chunk.")
 
-                # --- PRETTY-PRINT CONTENT ---
                 click.secho("  Content:", underline=True)
+                content_to_display = doc_meta.get('original_text', doc_content)
                 content_indent = "    "
                 wrapped_content = textwrap.fill(
-                    doc_content,
+                    content_to_display,
                     width=90,
                     initial_indent=content_indent,
                     subsequent_indent=content_indent
                 )
                 click.echo(wrapped_content)
 
-            else:
-                # --- NON-PRETTY (ORIGINAL) LOGIC, NOW WITH FILTERING ---
-                if include_metadata and keys_to_print:
+            else: # Not pretty
+                if should_print_metadata: # If --meta flag is present
                     click.secho("  Metadata:", underline=True)
                     for key in sorted(keys_to_print):
                         click.echo(f"    - {key}: ", nl=False)
-                        click.secho(f"{doc_meta[key]}", fg="cyan")
+                        click.secho(f"{doc_meta.get(key, 'N/A')}", fg="cyan")
 
-                # Print raw content
-                click.echo(doc_content)
+                # Always print content if not using --pretty
+                click.echo(doc_meta.get('original_text', doc_content))
+            # --- END FIX ---
 
         click.secho("\n--- End of Chunks ---", bold=True)
+
+    def get_holistic_summary(self, identifier):
+        """ Fetches the holistic summary for a single file. """
+        target_doc_id, meta = self._find_corpus_file(identifier)
+        if not target_doc_id:
+            return False, f"File '{identifier}' not found in the corpus manifest."
+
+        original_filename = Path(meta.get('original_path', 'Unknown')).name
+
+        results = self.collection.get(
+            where={"file_path": target_doc_id},
+            limit=1,
+            include=["metadatas"]
+        )
+
+        metadatas = results.get('metadatas')
+        if not metadatas:
+            return False, f"No chunks or metadata found for '{original_filename}'. Has it been ingested?"
+
+        summary = metadatas[0].get('holistic_summary')
+        if not summary:
+            return False, f"No holistic summary found for '{original_filename}'."
+
+        return True, {"original_name": original_filename, "summary": summary}
+
 
     def query_vector_store(self, query_text):
         click.echo(f"Querying project '{self.project_name}' for: '{query_text}'")

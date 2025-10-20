@@ -33,7 +33,7 @@ def show_interactive_help():
     click.echo("  /project  (alias: /p) - Manage projects")
     click.echo("  /corpus   (alias: /c) - Manage a project's corpus")
     click.echo("  /vector   (alias: /v) - Manage a project's vector store")
-    click.echo("  /analyze              - Analyze project data")
+    click.echo("  /analyze  (alias: /a) - Analyze project data")
     click.echo("  /help                 - Show this help message")
     click.echo("  /quit     (alias: /q) - Exit interactive mode")
 
@@ -72,7 +72,7 @@ def interactive_mode():
         'p': 'project',
         'v': 'vector',
         'q': 'quit',
-        # 'a': 'analyze' # You can uncomment this if you want '/a' for analyze
+        'a': 'analyze'  # <<< THIS IS THE ADDED ALIAS
     }
 
     while True:

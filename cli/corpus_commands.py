@@ -2,6 +2,7 @@ import click
 from core.vector_manager import VectorManager
 from utils.config import get_config
 from pathlib import Path
+import textwrap
 
 
 @click.group()
@@ -110,3 +111,38 @@ def rebuild(ctx):
     """Alias for 'ingest'. Rebuilds the entire vector store."""
     # This invokes the 'ingest' command, ensuring the logic is not duplicated.
     ctx.invoke(ingest)
+
+
+@corpus.command('summary')
+@click.argument('identifier')
+def summary(identifier):
+    """
+    Displays the holistic summary for a specific file.
+
+    Identifier can be the file's original name or its corpus ID.
+    Example: /corpus summary my_file.txt
+    """
+    try:
+        manager = VectorManager()
+        success, content = manager.get_holistic_summary(identifier)
+
+        if not success:
+            click.secho(f"🔥 {content}", fg="red")
+            return
+
+        original_name = content.get('original_name', 'Unknown')
+        holistic_summary = content.get('summary', 'No summary found.')
+
+        click.secho(f"\n--- Holistic Summary for: {original_name} ---", bold=True)
+        content_indent = "  "
+        wrapped_content = textwrap.fill(
+            holistic_summary,
+            width=100,
+            initial_indent=content_indent,
+            subsequent_indent=content_indent
+        )
+        click.echo(wrapped_content)
+        click.secho(f"--- End of Summary ---", bold=True)
+
+    except Exception as e:
+        click.secho(f"🔥 Error: {e}", fg="red")
