@@ -67,3 +67,48 @@ def exact(query_text, include_summary):
         manager.perform_exact_search(query_text, include_summary)
     except Exception as e:
         click.secho(f"🔥 Error: {e}", fg="red")
+
+
+# --- PLUGIN COMMANDS ---
+
+@analyze.command("tools")
+def tools():
+    """Lists all available Phase 2 analysis plugins."""
+    try:
+        manager = AnalyzeManager()
+        manager.list_plugins()
+    except Exception as e:
+        click.secho(f"🔥 Error: {e}", fg="red")
+
+
+@analyze.command("run")
+@click.argument('plugin_name')
+@click.argument('query_text', required=False)  # <-- MODIFIED
+@click.option('--k', default=5, type=int,
+              help='Number of items (e.g., clusters, outliers, or chunks).')
+@click.option('--options', help='Comma-separated options for plugins (e.g., categories).')  # <-- NEW
+def run(plugin_name, query_text, k, options):  # <-- MODIFIED
+    """
+    Runs a specific analysis plugin.
+
+    Examples:
+
+    /a run clustering --k 3
+
+    /a run anomaly --k 3
+
+    /a run summarize "user connection" --k 5
+
+    /a run categorize "feedback" --options "Positive,Negative"
+    """
+    try:
+        manager = AnalyzeManager()
+        # Pass all args as keyword arguments
+        manager.run_plugin(
+            plugin_name,
+            query_text=query_text,
+            k=k,
+            options=options
+        )
+    except Exception as e:
+        click.secho(f"🔥 Error: {e}", fg="red")

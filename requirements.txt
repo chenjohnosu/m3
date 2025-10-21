@@ -11,6 +11,9 @@ llama-index-llms-ollama
 sentence-transformers
 llama-index-vector-stores-chroma
 
+# Analysis
+scikit-learn
+
 # Document Parsing
 unstructured[local-inference]
 PyPDF2

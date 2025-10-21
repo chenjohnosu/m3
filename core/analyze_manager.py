@@ -5,6 +5,12 @@ import math
 
 from core.project_manager import ProjectManager
 from utils.config import get_config
+from core.plugin_manager import PluginManager
+
+# --- NEW IMPORTS ---
+from core.llm_manager import LLMManager
+from llama_index.core.llms import ChatMessage
+# --- END NEW IMPORTS ---
 
 # LlamaIndex components for querying
 from llama_index.core import VectorStoreIndex
@@ -57,6 +63,35 @@ class AnalyzeManager:
 
         self.vector_store = ChromaVectorStore(chroma_collection=self.collection)
         self.index = VectorStoreIndex.from_vector_store(self.vector_store)
+
+        # --- NEW: Initialize LLM Manager ---
+        try:
+            self.llm_manager = LLMManager(self.config)
+        except Exception as e:
+            click.secho(f"Warning: Could not initialize LLMManager: {e}", fg="yellow")
+            click.secho("  > LLM-based plugins (summarize, extract, etc.) will not work.", fg="yellow")
+            self.llm_manager = None
+        # --- END NEW ---
+
+    # --- NEW: Helper method for plugins ---
+    def get_llm(self, model_key='synthesis_model'):
+        """
+        Retrieves a designated LLM instance from the LLMManager.
+        'synthesis_model' is used by default for complex analysis.
+        """
+        if not self.llm_manager:
+            raise Exception("LLMManager is not initialized. Check config.yaml.")
+
+        # Look up the model from config (e.g., 'cogarc_settings' -> 'stage_3_model')
+        # For simplicity, we'll default to 'synthesis_model'
+        llm_model_key = self.config.get('ingestion_config', {}) \
+            .get('cogarc_settings', {}) \
+            .get('stage_3_model', 'synthesis_model')
+
+        click.echo(f"  > Loading LLM: '{llm_model_key}' for analysis...")
+        return self.llm_manager.get_llm(llm_model_key)
+
+    # --- END NEW ---
 
     def perform_topk_search(self, query_text, k, show_summary=False):
         """
@@ -179,7 +214,6 @@ class AnalyzeManager:
             click.secho(f"Source: ", nl=False)
             click.secho(f"{metadata.get('original_filename', 'Unknown')}", fg="green")
 
-            # --- THIS IS THE FIX ---
             # Get ALL metadata keys
             all_keys = list(metadata.keys())
 
@@ -192,7 +226,6 @@ class AnalyzeManager:
 
             # Filter the list
             keys_to_print = [k for k in all_keys if k not in keys_to_hide]
-            # --- END FIX ---
 
             for key in sorted(keys_to_print):
                 if key in metadata:  # Check if key exists before printing
@@ -216,3 +249,45 @@ class AnalyzeManager:
             click.echo(wrapped_content)
 
         click.secho("\n--- End of Results ---", bold=True)
+
+    # --- PLUGIN METHODS ---
+
+    def list_plugins(self):
+        """
+        Loads and displays all available analysis plugins.
+        """
+        click.secho("--- Available Analysis Tools ---", bold=True)
+        manager = PluginManager()
+        plugins = manager.get_plugins()
+
+        if not plugins:
+            click.secho("No plugins found in the 'plugins' directory.", fg="yellow")
+            return
+
+        # Find the longest key for formatting
+        max_key_len = max(len(key) for key in plugins.keys()) if plugins else 0
+
+        for key, plugin in sorted(plugins.items()):
+            click.secho(f"  {key:<{max_key_len}}", fg="cyan", nl=False)
+            click.echo(f" : {plugin.description}")
+
+    def run_plugin(self, plugin_name: str, **kwargs):
+        """
+        Core logic for /analyze run <plugin_name>
+        Finds and executes the specified analyzer plugin.
+        """
+        manager = PluginManager()
+        plugin = manager.get_plugin(plugin_name)
+
+        if not plugin:
+            click.secho(f"🔥 Error: Plugin '{plugin_name}' not found.", fg="red")
+            available = ", ".join(manager.get_plugins().keys())
+            click.echo(f"  > Available plugins: {available}")
+            return
+
+        try:
+            # Pass this instance of AnalyzeManager (self) to the plugin
+            # along with any other kwargs (like query_text, k, options)
+            plugin.analyze(self, **kwargs)
+        except Exception as e:
+            click.secho(f"🔥 Error during plugin execution: {e}", fg="red")

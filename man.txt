@@ -1,108 +1,221 @@
+Here are the updated help files with the new `analyze` subcommands.
+
+### **`cli/analyze_commands.py`**
+
+This file is updated with the new `tools` and `run` commands.
+
+```python
+import click
+from core.analyze_manager import AnalyzeManager
+
+
+@click.group()
+def analyze():
+    """Commands for analyzing project data."""
+    pass
+
+
+@analyze.command("topk")
+@click.argument('query_text')
+@click.option('--k', default=3, type=int, help='The number of top chunks to retrieve. Default is 3.')
+@click.option('--summary', 'show_summary', is_flag=True, help='Also show holistic summaries in results.')
+def topk(query_text, k, show_summary):
+    """
+    Finds the Top-K most semantically aligned chunks.
+
+    Searches (by default): Chunk Content + Themes
+    (Summary inclusion for search is controlled by 'config.yaml')
+
+    Example: /analyze topk "connection" --k 5
+    """
+    try:
+        manager = AnalyzeManager()
+        manager.perform_topk_search(query_text, k, show_summary)
+    except Exception as e:
+        click.secho(f"🔥 Error: {e}", fg="red")
+
+
+@analyze.command("search")
+@click.argument('query_text')
+@click.option('--threshold', default=1.0, type=float,
+              help='The similarity threshold (L2 Distance). Finds all chunks with a score *less than* this value. Default is 1.0.')
+@click.option('--summary', 'show_summary', is_flag=True, help='Also show holistic summaries in results.')
+def search(query_text, threshold, show_summary):
+    """
+    (Phase 1) Finds ALL chunks that meet a similarity threshold.
+
+    Searches (by default): Chunk Content + Themes
+    (Summary inclusion for search is controlled by 'config.yaml')
+
+    Example: /analyze search "grounded theory" --threshold 0.8
+    """
+    try:
+        manager = AnalyzeManager()
+        manager.perform_threshold_search(query_text, threshold, show_summary)
+    except Exception as e:
+        click.secho(f"🔥 Error: {e}", fg="red")
+
+
+@analyze.command("exact")
+@click.argument('query_text')
+@click.option('--summary', 'include_summary', is_flag=True, help='Also search in and display holistic summaries.')
+def exact(query_text, include_summary):
+    """
+    Finds all chunks with an *exact string match* (case-sensitive).
+
+    Searches (by default): Chunk Content + Themes
+    Use --summary to search in summaries as well.
+
+    Example: /analyze exact "professors" --summary
+    """
+    try:
+        manager = AnalyzeManager()
+        # This flag controls both search and display
+        manager.perform_exact_search(query_text, include_summary)
+    except Exception as e:
+        click.secho(f"🔥 Error: {e}", fg="red")
+
+
+# --- NEW PLUGIN COMMANDS ---
+
+@analyze.command("tools")
+def tools():
+    """Lists all available Phase 2 analysis plugins."""
+    try:
+        manager = AnalyzeManager()
+        manager.list_plugins()
+    except Exception as e:
+        click.secho(f"🔥 Error: {e}", fg="red")
+
+
+@analyze.command("run")
+@click.argument('plugin_name')
+# Add more options here as your plugins become more complex
+# @click.option('--k', default=5, type=int, help='Number of clusters (for clustering plugin).')
+def run(plugin_name):
+    """
+    Runs a specific analysis plugin (e.g., clustering).
+
+    Example: /analyze run clustering
+    """
+    try:
+        manager = AnalyzeManager()
+        # Pass any extra CLI options as kwargs
+        manager.run_plugin(plugin_name) # e.g., manager.run_plugin(plugin_name, k=k)
+    except Exception as e:
+        click.secho(f"🔥 Error: {e}", fg="red")
+```
+
+-----
+
+### **`man.txt`**
+
+I've updated the `analyze` command section to reflect the new subcommands: `topk`, `search`, `exact`, `tools`, and `run`.
+
+```
 M3(1)                            User Manuals                            M3(1)NAMEm3 - a local-first document analysis toolkitSYNOPSISm3 [OPTIONS] COMMAND [ARGS]...   m3 --go
 
    m3 --batch <FILENAME>
-DESCRIPTIONm3 (monkey3) is a command-line tool designed for managing andpreparing collections of text documents for semantic analysis. Itprovides a project-based workflow to ingest documents in variousformats (.txt, .pdf, .docx), track their versions, and convert theircontent into a searchable vector store using local, self-hostedembedding models.MODES OF OPERATIONCommand-line modeExecute a single command and exit. This is the default mode.   Interactive mode (--go)
+DESCRIPTIONm3 (monkey3) is a command-line tool designed for managing andpreparing collections of text documents for semantic analysis.
+Itprovides a project-based workflow to ingest documents in variousformats (.txt, .pdf, .docx), track their versions, and convert theircontent into a searchable vector store using local, self-hostedembedding models.MODES OF OPERATIONCommand-line modeExecute a single command and exit.
+This is the default mode.   Interactive mode (--go)
           Enter a read-eval-print loop (REPL) for executing multiple
-          commands in a session. In this mode, all commands must be
-          preceded by a forward slash (/). For example: /project list.
+          commands in a session.
+In this mode, all commands must be
+          preceded by a forward slash (/).
+For example: /project list.
 
    Batch mode (--batch <FILENAME>)
           Execute a sequence of m3 commands from a specified text file.
-          Blank lines and lines beginning with # are ignored.
+Blank lines and lines beginning with # are ignored.
 COMMANDSThe following commands are available:   project
           Commands for managing projects.
-
-          create <PROJECT_NAME>
+create <PROJECT_NAME>
                  Creates a new, empty project with a corpus and a vector
                  store.
-
-          list
-                 Lists all available projects. An (active) marker
+list
+                 Lists all available projects.
+An (active) marker
                  indicates the current project.
-
-          active <PROJECT_NAME>
+active <PROJECT_NAME>
                  Sets the active project for the current session.
-
-          remove <PROJECT_NAME>
+remove <PROJECT_NAME>
                  Permanently deletes a project and all its associated
                  data, including the corpus and vector store.
-
-          dialogue <PROJECT_NAME>
+dialogue <PROJECT_NAME>
                  (Placeholder) Starts an interactive dialogue session
                  with the project's data.
-
-   corpus
+corpus
           Commands for managing the active project's corpus.
-
-          add <PATH>[ <PATH>]...
+add <PATH>[ <PATH>]...
                  Adds one or more files to the active project's corpus.
-                 The path can be a single file, a directory (all files
+The path can be a single file, a directory (all files
                  within will be added recursively), or a wildcard pattern
                  (e.g., "data/*.txt").
-
-          remove <FILENAME>
+remove <FILENAME>
                  Removes a file from the active project's corpus and its
                  corresponding entries from the vector store.
-
-          list
+list
                  Lists all files in the active project's corpus,
                  including their version number and unique ID (UUID).
-
-          ingest
+ingest
                  Processes all new or updated files in the corpus,
                  converts them to text, and stores them as vector
                  embeddings in the project's vector store.
-
-   vector
+vector
           Commands for managing the active project's vector store.
-
-          status
+status
                  Displays a detailed status of the vector store, including
                  its location, the number of indexed text chunks, and the
                  active embedding model configuration.
-
-          create
+create
                  Creates a new, blank vector store for the active project.
-                 If a store already exists, it will be wiped clean. This
+If a store already exists, it will be wiped clean.
+This
                  is useful for resetting a corrupted store or starting an
                  ingestion from scratch.
-
-          chunks <FILENAME>
+chunks <FILENAME>
                  Retrieves and displays the text content of all chunks
                  for a specific file that has been ingested into the
-                 vector store. Useful for debugging the text-splitting
+                 vector store.
+Useful for debugging the text-splitting
                  process.
-
-   analyze
+analyze
           Commands for analyzing project data.
-
-          query <QUERY_TERM>
-                 (Placeholder) Searches the vector store for a given term.
+          topk <QUERY> [--k N]
+                 Finds the Top-K most semantically similar chunks.
+          search <QUERY> [--threshold N]
+                 Finds all chunks that meet a similarity threshold.
+          exact <QUERY_TERM>
+                 Finds all chunks with an exact string match.
+          tools
+                 Lists all available analysis plugins.
+          run <PLUGIN_NAME>
+                 Runs a specific analysis plugin.
 CONFIGURATION
-    The main configuration is stored in ~/.monkey3/config.yaml. This file
-    controls the embedding models and other settings.   embedding_profiles
-    Defines one or more profiles for the ingestion process. Each
+    The main configuration is stored in ~/.monkey3/config.yaml.
+This file
+    controls the embedding models and other settings.
+embedding_profiles
+    Defines one or more profiles for the ingestion process.
+Each
     profile specifies the embed_model (from Hugging Face), the
    chunk_size, and the chunk_overlap.
-
-   active_profile
+active_profile
           Specifies which of the embedding_profiles to use when running
           the /corpus ingest command.
 FILES
-    ~/.monkey3/The base directory for all m3 data and configuration.   ~/.monkey3/config.yaml
+    ~/.monkey3/The base directory for all m3 data and configuration.
+~/.monkey3/config.yaml
           The global configuration file.
-
-   ~/.monkey3/projects/<PROJECT_NAME>/
+~/.monkey3/projects/<PROJECT_NAME>/
           The directory for a specific project.
-
-   ~/.monkey3/projects/<PROJECT_NAME>/corpus/
+~/.monkey3/projects/<PROJECT_NAME>/corpus/
           Contains the original documents and the manifest.
-
-   ~/.monkey3/projects/<PROJECT_NAME>/corpus/corpus_manifest.json
+~/.monkey3/projects/<PROJECT_NAME>/corpus/corpus_manifest.json
           A JSON file that tracks every file in the corpus, including
           its version, content hash, and unique ID.
-
-   ~/.monkey3/projects/<PROJECT_NAME>/vector_store/
+~/.monkey3/projects/<PROJECT_NAME>/vector_store/
           Contains the ChromaDB persistent vector store.
 EXAMPLES
 A typical workflow:   # Create and activate a new project
@@ -120,4 +233,6 @@ A typical workflow:   # Create and activate a new project
 
    # Inspect the chunks for a specific file
    $ m3 vector chunks my_document.txt
-M3(1)                            October 2025                            M3(1)
+M3(1)            
+                October 2025                            M3(1)
+```
