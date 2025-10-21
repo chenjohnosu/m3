@@ -1,4 +1,7 @@
 from llama_index.llms.ollama import Ollama
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from utils.config import get_config
+import click
 
 
 class LLMManager:
@@ -26,14 +29,63 @@ class LLMManager:
         """
         Gets a LlamaIndex LLM instance for a given model key (e.g., 'synthesis_model').
         """
+        ingestion_conf = self.config.get('ingestion_config', {})
+        cogarc_settings = ingestion_conf.get('cogarc_settings', {})
+
+        # Determine which model key to use
+        if model_key == 'synthesis_model':
+            model_key_to_use = cogarc_settings.get('stage_3_model')
+        elif model_key == 'enrichment_model':
+            model_key_to_use = cogarc_settings.get('stage_2_model')
+        elif model_key == 'stratify_model':
+            model_key_to_use = cogarc_settings.get('stage_0_model')
+        elif model_key == 'structure_model':
+            model_key_to_use = cogarc_settings.get('stage_1_model')
+        else:
+            # Fallback for other keys like 'default_model'
+            model_key_to_use = model_key
+
+        if not model_key_to_use:
+            raise ValueError(f"No model key defined for role '{model_key}' in cogarc_settings.")
+
         for client_name, client_data in self.clients.items():
-            if model_key in client_data['models']:
-                model_info = client_data['models'][model_key]
-                print(f"  > Instantiating LLM '{model_info['model_name']}' for role '{model_key}'...")
+            if model_key_to_use in client_data['models']:
+                model_info = client_data['models'][model_key_to_use]
+                click.echo(
+                    f"  > Instantiating LLM '{model_info['model_name']}' for role '{model_key}' (using key '{model_key_to_use}')...")
                 return Ollama(
                     model=model_info['model_name'],
                     base_url=client_data['base_url'],
-                    request_timeout=model_info.get('request_timeout', 60.0)
+                    request_timeout=model_info.get('request_timeout', 120.0)
                 )
 
-        raise ValueError(f"LLM model key '{model_key}' not found in llm_providers in config.yaml")
+        raise ValueError(
+            f"LLM model key '{model_key_to_use}' (for role '{model_key}') not found in llm_providers in config.yaml")
+
+
+# -----------------------------------------------------------------
+# --- ADD THIS MISSING FUNCTION ---
+# -----------------------------------------------------------------
+
+def get_embedding_model(config=None):
+    """
+    Creates and returns a LlamaIndex embedding model instance based on the config.
+    This function is required by VectorManager.
+    """
+    if not config:
+        config = get_config()
+
+    embed_config = config.get('embedding_settings', {})
+    model_name = embed_config.get('model_name')
+
+    if not model_name:
+        raise ValueError("Embedding model name not found in config.yaml under 'embedding_settings'.")
+
+    click.echo(f"  > Loading embedding model: {model_name}")
+
+    # This uses the default cache folder (~/.cache/huggingface/hub)
+    # You can add 'cache_folder' to your config.yaml 'embedding_settings' if needed
+    return HuggingFaceEmbedding(
+        model_name=model_name,
+        cache_folder=embed_config.get('cache_folder', None)
+    )

@@ -7,19 +7,22 @@ import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 import hashlib
+from typing import List, Tuple
 
 # LlamaIndex core components
 from llama_index.core import VectorStoreIndex, StorageContext, Settings
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 import chromadb
+from llama_index.core.schema import BaseNode
+from llama_index.core.vector_stores import VectorStoreQuery
 
 # Project-specific components
 from utils.file_reader import read_files
 from core.project_manager import ProjectManager
-from core.llm_manager import LLMManager
+from core.llm_manager import LLMManager, get_embedding_model  # <-- FIX 1: Correct imports
 from core.ingestion.pipeline_factory import get_pipeline
-from core.db_manager import get_embed_model, get_chroma_client
+from core.db_manager import DBManager  # <-- FIX 2: Import DBManager
 
 # E5 models expect cosine similarity
 CHROMA_METADATA = {"hnsw:space": "cosine"}
@@ -53,18 +56,21 @@ class VectorManager:
 
         os.makedirs(self.corpus_path, exist_ok=True)
 
-        # --- Use db_manager ---
+        # --- FIX 3: Use correct embedding model function ---
         embed_config = self.config.get('embedding_settings', {})
         model_name = embed_config.get('model_name')
         if not model_name:
             raise ValueError("Embedding model name not found in config.yaml.")
 
-        get_embed_model(model_name)
+        # get_embed_model(model_name) # <-- This was the old, incorrect call
+        Settings.embed_model = get_embedding_model(model_name)  # <-- NEW: Set in LlamaIndex Settings
 
         llm_manager = LLMManager(self.config)
         Settings.llm = llm_manager.get_llm('enrichment_model')
 
-        self.client = get_chroma_client(self.chroma_db_path)
+        # --- FIX 4: Initialize Chroma client directly ---
+        # self.client = get_chroma_client(self.chroma_db_path) # <-- This function is no longer in db_manager
+        self.client = chromadb.PersistentClient(path=self.chroma_db_path)  # <-- NEW: Initialize directly
 
         self.collection = self.client.get_or_create_collection(
             name="m3_collection",
@@ -74,7 +80,12 @@ class VectorManager:
         self.vector_store = ChromaVectorStore(chroma_collection=self.collection)
         self.storage_context = StorageContext.from_defaults(vector_store=self.vector_store)
 
-        self.index = VectorStoreIndex.from_documents([], storage_context=self.storage_context)
+        # --- FIX 5: Load index from vector store, don't create new blank one ---
+        self.index = VectorStoreIndex.from_vector_store(
+            self.vector_store,
+            storage_context=self.storage_context
+        )
+        # self.index = VectorStoreIndex.from_documents([], storage_context=self.storage_context) # <-- OLD
 
     def _load_metadata(self):
         if not os.path.exists(self.metadata_path):
@@ -102,17 +113,74 @@ class VectorManager:
             click.secho("  > Failed to read document.", fg="yellow")
             return
 
-        pipeline = get_pipeline('cogarc', self.config)
+        # --- FIX 6: Correctly instantiate and pass managers to pipeline ---
+        # The new pipeline stages (1 & 2) need the managers, not just the config.
+        llm_manager = LLMManager(self.config)
+        db_manager = DBManager(self.project_manager)
+
+        # pipeline = get_pipeline('cogarc', self.config) # <-- OLD
+        pipeline = get_pipeline('cogarc', llm_manager, db_manager, self, self.project_manager)  # <-- NEW
+
         processed_data = pipeline.run(documents, doc_type)
         nodes = processed_data.get('primary_nodes', [])
 
         if nodes:
-            self.index.insert_nodes(nodes)
-            click.echo(f"  > Stored {len(nodes)} chunks in the vector store.")
+            # The pipeline's BasePipeline.run() already calls self.add_nodes(nodes)
+            # so we don't need self.index.insert_nodes(nodes) here.
+            click.echo(f"  > Pipeline processed {len(nodes)} chunks.")
         else:
             click.secho("  > No chunks were generated from the document.", fg="yellow")
 
         click.echo("--- Finished Processing ---")
+
+    # --- FIX 7: Add methods required by BasePipeline and Stage 2 ---
+
+    def add_nodes(self, nodes: List[BaseNode], doc_id: str):
+        """Adds a list of nodes to the vector index. Called by the pipeline."""
+        if not nodes:
+            return
+
+        click.echo(f"  > Adding {len(nodes)} nodes from {doc_id} to vector store...")
+        # insert_nodes is the correct method for the index
+        self.index.insert_nodes(nodes)
+
+    def search(self, query: str, top_k: int = 5) -> List[Tuple[BaseNode, float]]:
+        """
+        Performs a similarity search against the vector store.
+        Returns a list of tuples: (node, score)
+        Called by Stage 2 Enrich (Paraphrase ID).
+        """
+        query_embedding = Settings.embed_model.get_query_embedding(query)
+        vector_store_query = VectorStoreQuery(
+            query_embedding=query_embedding,
+            similarity_top_k=top_k
+        )
+        query_result = self.vector_store.query(vector_store_query)
+
+        nodes_with_scores = []
+        if query_result.nodes:
+            for node, score in zip(query_result.nodes, query_result.similarities):
+                nodes_with_scores.append((node, score))
+        return nodes_with_scores
+
+    def get_all_nodes(self) -> List[BaseNode]:
+        """Retrieves all nodes from the vector store."""
+        all_ids = self.collection.get(include=[])['ids']
+        if not all_ids:
+            return []
+
+        results = self.collection.get(ids=all_ids, include=["metadatas", "documents"])
+        nodes = []
+        for i, doc_id in enumerate(results['ids']):
+            # Reconstruct minimal BaseNode objects
+            nodes.append(BaseNode(
+                id_=doc_id,
+                text=results['documents'][i],
+                metadata=results['metadatas'][i]
+            ))
+        return nodes
+
+    # --- End of new methods ---
 
     def add_to_corpus(self, paths, doc_type):
         metadata = self._load_metadata()
@@ -177,7 +245,10 @@ class VectorManager:
         )
         self.vector_store = ChromaVectorStore(chroma_collection=self.collection)
         self.storage_context = StorageContext.from_defaults(vector_store=self.vector_store)
-        self.index = VectorStoreIndex.from_documents([], storage_context=self.storage_context)
+        self.index = VectorStoreIndex.from_vector_store(
+            self.vector_store,
+            storage_context=self.storage_context
+        )
 
         metadata = self._load_metadata()
         if not metadata:
@@ -253,21 +324,13 @@ class VectorManager:
         for i, (doc_content, doc_meta) in enumerate(items):
             click.secho(f"\n[Chunk {i + 1}]", fg="yellow")
 
-            # Get ALL metadata keys
             all_keys = list(doc_meta.keys())
-
-            # Define keys to ALWAYS hide (internal stuff)
             keys_to_hide = ['original_filename', 'file_path', 'original_text']
 
-            # Conditionally HIDE the summary
             if not show_summary:
                 keys_to_hide.append('holistic_summary')
 
-            # Filter the list
             keys_to_print = [k for k in all_keys if k not in keys_to_hide]
-
-            # --- THIS IS THE FIX ---
-            # Determine if we should print metadata based on flags
             should_print_metadata = (pretty or include_metadata) and keys_to_print
 
             if pretty:
@@ -295,16 +358,14 @@ class VectorManager:
                 )
                 click.echo(wrapped_content)
 
-            else: # Not pretty
-                if should_print_metadata: # If --meta flag is present
+            else:  # Not pretty
+                if should_print_metadata:  # If --meta flag is present
                     click.secho("  Metadata:", underline=True)
                     for key in sorted(keys_to_print):
                         click.echo(f"    - {key}: ", nl=False)
                         click.secho(f"{doc_meta.get(key, 'N/A')}", fg="cyan")
 
-                # Always print content if not using --pretty
                 click.echo(doc_meta.get('original_text', doc_content))
-            # --- END FIX ---
 
         click.secho("\n--- End of Chunks ---", bold=True)
 
@@ -331,7 +392,6 @@ class VectorManager:
             return False, f"No holistic summary found for '{original_filename}'."
 
         return True, {"original_name": original_filename, "summary": summary}
-
 
     def query_vector_store(self, query_text):
         click.echo(f"Querying project '{self.project_name}' for: '{query_text}'")
