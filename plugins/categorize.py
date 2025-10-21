@@ -12,7 +12,7 @@ class CategorizePlugin(LLMBaseAnalyzerPlugin):
     Categorizes retrieved chunks based on user-defined options.
     """
     key: str = "categorize"
-    description: str = "Categorizes chunks using query. --options='cat1,cat2'"
+    description: str = "Categorizes chunks. Usage: ... run categorize \"<query>\" --options=\"cat1,cat2\""
 
     def get_system_prompt(self, query: str, options: str | None) -> str:
         """

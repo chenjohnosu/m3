@@ -11,7 +11,7 @@ class SentimentPlugin(LLMBaseAnalyzerPlugin):
     Performs sentiment analysis on chunks related to a query.
     """
     key: str = "sentiment"
-    description: str = "Performs sentiment analysis on chunks relevant to a query."
+    description: str = "Performs sentiment analysis. Usage: ... run sentiment \"<query>\" --threshold 0.7"
 
     def get_system_prompt(self, query: str, options: str | None) -> str:
         """

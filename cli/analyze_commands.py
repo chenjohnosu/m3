@@ -30,8 +30,8 @@ def topk(query_text, k, show_summary):
 
 @analyze.command("search")
 @click.argument('query_text')
-@click.option('--threshold', default=1.0, type=float,
-              help='The similarity threshold (L2 Distance). Finds all chunks with a score *less than* this value. Default is 1.0.')
+@click.option('--threshold', default=0.7, type=float,
+              help='The similarity threshold (0.0 to 1.0). Finds all chunks with a score *greater than* this value.')
 @click.option('--summary', 'show_summary', is_flag=True, help='Also show holistic summaries in results.')
 def search(query_text, threshold, show_summary):
     """
@@ -44,6 +44,8 @@ def search(query_text, threshold, show_summary):
     """
     try:
         manager = AnalyzeManager()
+        # Note: The 'search' command had a bug in its help text (lower score is better for L2, not cosine)
+        # Your 'analyze_manager.py' correctly uses cosine (higher is better), so we default to 0.7
         manager.perform_threshold_search(query_text, threshold, show_summary)
     except Exception as e:
         click.secho(f"🔥 Error: {e}", fg="red")
@@ -83,11 +85,13 @@ def tools():
 
 @analyze.command("run")
 @click.argument('plugin_name')
-@click.argument('query_text', required=False)  # <-- MODIFIED
+@click.argument('query_text', required=False)
 @click.option('--k', default=5, type=int,
-              help='Number of items (e.g., clusters, outliers, or chunks).')
-@click.option('--options', help='Comma-separated options for plugins (e.g., categories).')  # <-- NEW
-def run(plugin_name, query_text, k, options):  # <-- MODIFIED
+              help='Number of items (e.g., clusters, outliers, or top chunks for LLM).')
+@click.option('--threshold', default=0.7, type=float,
+              help='Similarity threshold for LLM plugins (0.0 to 1.0).')  # <-- NEW
+@click.option('--options', help='Comma-separated options for plugins (e.g., categories).')
+def run(plugin_name, query_text, k, threshold, options):  # <-- MODIFIED
     """
     Runs a specific analysis plugin.
 
@@ -95,11 +99,9 @@ def run(plugin_name, query_text, k, options):  # <-- MODIFIED
 
     /a run clustering --k 3
 
-    /a run anomaly --k 3
+    /a run summarize "user connection" --k 5 --threshold 0.75
 
-    /a run summarize "user connection" --k 5
-
-    /a run categorize "feedback" --options "Positive,Negative"
+    /a run entity "safety concerns" --options="People,Locations"
     """
     try:
         manager = AnalyzeManager()
@@ -108,6 +110,7 @@ def run(plugin_name, query_text, k, options):  # <-- MODIFIED
             plugin_name,
             query_text=query_text,
             k=k,
+            threshold=threshold,  # <-- NEW
             options=options
         )
     except Exception as e:

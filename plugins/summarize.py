@@ -11,7 +11,7 @@ class SummarizePlugin(LLMBaseAnalyzerPlugin):
     Performs RAG-based summarization on a query.
     """
     key: str = "summarize"
-    description: str = "Summarizes relevant chunks based on a query."
+    description: str = "Summarizes chunks. Usage: ... run summarize \"<query>\" --k 5 --threshold 0.7"
 
     def get_system_prompt(self, query: str, options: str | None) -> str:
         """

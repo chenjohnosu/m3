@@ -38,8 +38,9 @@ class LLMBaseAnalyzerPlugin(BaseAnalyzerPlugin):
         The main analysis loop: retrieve, build context, call LLM.
         """
         query = kwargs.get('query_text')
-        k = kwargs.get('k', 5)  # Default to 5 chunks
+        k = kwargs.get('k', 5)  # Max chunks to send to LLM
         options = kwargs.get('options')
+        threshold = kwargs.get('threshold', 0.7)  # Similarity threshold
 
         if not query:
             click.secho(f"🔥 Error: The '{self.key}' plugin requires a query.", fg="red")
@@ -50,7 +51,7 @@ class LLMBaseAnalyzerPlugin(BaseAnalyzerPlugin):
         click.echo(f"  > Query: {query}")
         if options:
             click.echo(f"  > Options: {options}")
-        click.echo(f"  > Retrieving Top {k} chunks...")
+        click.echo(f"  > Finding all chunks with score > {threshold}...")
 
         # 1. Get LLM from manager
         try:
@@ -61,28 +62,41 @@ class LLMBaseAnalyzerPlugin(BaseAnalyzerPlugin):
             click.secho(f"  > Details: {e}", fg="red")
             return
 
-        # 2. Retrieve chunks (like /a topk)
-        retriever = manager.index.as_retriever(similarity_top_k=k)
-        results = retriever.retrieve(query)
+        # --- MODIFIED RETRIEVAL LOGIC ---
+        # 2. Retrieve all chunks above a threshold (like /a search)
+        #    We ask for a large k (e.g., 200) to get a big pool to filter
+        retriever = manager.index.as_retriever(similarity_top_k=200)
+        all_results = retriever.retrieve(query)
 
-        if not results:
-            click.secho(f"  > No relevant chunks found for query.", fg="yellow")
+        threshold_results = [
+            res for res in all_results
+            if res.score > threshold
+        ]
+
+        if not threshold_results:
+            click.secho(f"  > No relevant chunks found above threshold {threshold}.", fg="yellow")
             return
 
-        # 3. Build context string
+        # 3. Select the Top-K chunks *from the threshold set*
+        #    This limits the context sent to the LLM.
+        final_results = threshold_results[:k]
+        click.echo(f"  > Found {len(threshold_results)} chunks. Selecting top {len(final_results)} for LLM.")
+        # --- END MODIFIED LOGIC ---
+
+        # 4. Build context string
         context_parts = []
         sources = set()
-        for i, res in enumerate(results):
+        for i, res in enumerate(final_results):
             meta = res.node.metadata
             filename = meta.get('original_filename', 'Unknown')
             sources.add(filename)
             # Use 'original_text' from metadata for clean context
             text = meta.get('original_text', res.node.get_content())
-            context_parts.append(f"--- Context Chunk {i + 1} (Source: {filename}) ---\n{text}")
+            context_parts.append(f"--- Context Chunk {i + 1} (Source: {filename}) (Score: {res.score:.4f}) ---\n{text}")
 
         context_str = "\n\n".join(context_parts)
 
-        # 4. Get formatted system prompt from subclass
+        # 5. Get formatted system prompt from subclass
         system_prompt = self.get_system_prompt(query, options)
         user_prompt = f"Here is the context to analyze:\n\n{context_str}"
 
@@ -91,8 +105,8 @@ class LLMBaseAnalyzerPlugin(BaseAnalyzerPlugin):
             ChatMessage(role="user", content=user_prompt)
         ]
 
-        # 5. Call LLM and print response
-        click.echo(f"  > Sending context from {len(results)} chunks ({len(sources)} sources) to LLM...")
+        # 6. Call LLM and print response
+        click.echo(f"  > Sending context from {len(final_results)} chunks ({len(sources)} sources) to LLM...")
         try:
             response = llm.chat(messages)
             response_text = response.message.content

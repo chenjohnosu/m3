@@ -11,7 +11,7 @@ class EntityPlugin(LLMBaseAnalyzerPlugin):
     Extracts entities from chunks based on user-defined options.
     """
     key: str = "entity"
-    description: str = "Extracts entities from chunks. --options='people,places'"
+    description: str = "Extracts entities. Usage: ... run entity \"<query>\" --options=\"people,places\""
 
     def get_system_prompt(self, query: str, options: str | None) -> str:
         """
