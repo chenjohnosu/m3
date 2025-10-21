@@ -29,7 +29,7 @@ def add(paths, doc_type):
         click.echo(f"No --type specified, using default: '{doc_type}'")
 
     try:
-        manager = VectorManager(config)
+        manager = VectorManager(config)  # <-- Correct
         manager.add_to_corpus(list(paths), doc_type)
         click.secho(f"\n✅ Successfully added and processed {len(paths)} path(s).", fg="green")
     except Exception as e:
@@ -41,7 +41,7 @@ def add(paths, doc_type):
 def remove(identifier):
     """Removes a file from the corpus by its original filename or ID."""
     try:
-        manager = VectorManager()
+        manager = VectorManager(get_config())  # <-- FIXED
         success, message = manager.remove_from_corpus(identifier)
         if success:
             click.secho(f"Success: {message}", fg="green")
@@ -55,7 +55,7 @@ def remove(identifier):
 def list_files():
     """Lists all files in the active project's corpus."""
     try:
-        manager = VectorManager()
+        manager = VectorManager(get_config())  # <-- FIXED
         corpus_items = manager.list_corpus()
         if not corpus_items:
             click.echo("The corpus is currently empty.")
@@ -97,7 +97,8 @@ def ingest(ctx):
         click.echo("This command will re-process the entire corpus, which can be time-consuming.")
         # Add a confirmation prompt that defaults to 'No' for safety.
         click.confirm("Are you sure you want to proceed?", abort=True, default=False)
-        manager = VectorManager()
+
+        manager = VectorManager(get_config())  # <-- Correct
         manager.rebuild_vector_store()
     except click.exceptions.Abort:
         click.echo("Operation cancelled by user.")
@@ -123,7 +124,7 @@ def summary(identifier):
     Example: /corpus summary my_file.txt
     """
     try:
-        manager = VectorManager()
+        manager = VectorManager(get_config())  # <-- FIXED
         success, content = manager.get_holistic_summary(identifier)
 
         if not success:

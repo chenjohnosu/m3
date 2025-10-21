@@ -1,180 +1,76 @@
-# core/ingestion/stages/cogarc_stage_2_enrich.py
-
-import json
-from typing import List
 import click
-from llama_index.core.schema import Document, BaseNode
-# NEW: Import ChatMessage and MessageRole
-from llama_index.core.llms import ChatMessage, MessageRole
-from .base_stage import BaseStage
+from core.ingestion.stages.base_stage import BaseStage
+from llama_index.core.node_parser import SentenceSplitter
+from llama_index.core.llms import ChatMessage
 
+# A system prompt designed to generate a concise, relevant question for a chunk of text.
+# --- UPDATED: Removed all examples to prevent "prompt bleed" ---
+SYSTEM_PROMPT = """
+You are an expert in synthesizing information. Your task is to read the following text chunk and generate a single, concise, and relevant question that this text could answer.
+The question should be a natural-language query that a user might ask to find this specific information.
 
-# REMOVED: from core.llm_dialogue import LLMDialogue
+---
+IMPORTANT RULES:
+1.  Your output MUST be only the question itself.
+2.  Do NOT include any preamble like "Here is the question:".
+3.  Do NOT copy any part of this system prompt.
+4.  Generate ONE question ONLY.
+5.  The output must be a single string, not a JSON object.
+---
+
+Read the text below and provide only the question.
+"""
+
 
 class CogArcStage2Enrich(BaseStage):
-    """
-    Implements the 'Enrichment' stage (Stage 2) of the CogArc pipeline.
 
-    This stage enriches each chunk (BaseNode) with additional metadata:
-    1.  Generates a hypothetical question the chunk could answer.
-    2.  Performs nuanced affective (sentiment) analysis.
-    3.  Identifies potential paraphrases/semantic duplicates from the *existing* vector store.
-    """
+    # This method must be defined to implement the abstract method from BaseStage
+    def process(self, data):
+        print(f"Executing CogArc Stage 2: Micro-Context Enrichment using LLM: {self.llm.model}")
 
-    def __init__(self, llm_manager, db_manager, vector_manager, project_manager):
-        super().__init__(llm_manager, db_manager, vector_manager, project_manager)
-        self.stage_name = "Stage 2: Enrich"
+        documents_to_chunk = data.get('documents', [])
+        if not documents_to_chunk:
+            print("  > No documents to process for Stage 2.")
+            return data
 
-    def _get_llm(self, model_key='default_model'):
-        """Helper to get a specific LLM."""
-        # Use 'default_model' for these simpler tasks
-        try:
-            return self.llm_manager.get_llm(model_key)
-        except ValueError:
-            click.echo(f"  Warning: LLM model key '{model_key}' not found. Falling back to 'synthesis_model'.",
-                       err=True)
+        # Use the SentenceSplitter to create the final text chunks (nodes).
+        # We can configure this from config.yaml in a future update.
+        splitter = SentenceSplitter(chunk_size=512, chunk_overlap=100)
+        nodes = splitter.get_nodes_from_documents(documents_to_chunk)
+
+        enriched_nodes = []
+        for i, node in enumerate(nodes):
             try:
-                return self.llm_manager.get_llm('synthesis_model')
-            except ValueError as e:
-                click.echo(f"  Fatal Error: 'synthesis_model' also not found. {e}", err=True)
-                raise
+                click.echo(f"  > Enriching chunk {i + 1}/{len(nodes)}...")
 
-    def _generate_hypothetical_question(self, chunk: BaseNode):
-        """
-        Generates a hypothetical question that the chunk's content could answer.
-        """
-        system_prompt = (
-            "You are a research assistant. Read the following text. "
-            "Generate a single, concise, relevant question that this text could be the answer to. "
-            "Respond ONLY with the question."
-        )
-        user_prompt = f"Text:\n---\n{chunk.get_content()}"
+                messages = [
+                    ChatMessage(role="system", content=SYSTEM_PROMPT),
+                    ChatMessage(role="user", content=node.get_content())
+                ]
 
-        messages = [
-            ChatMessage(role=MessageRole.SYSTEM, content=system_prompt),
-            ChatMessage(role=MessageRole.USER, content=user_prompt),
-        ]
+                response = self.llm.chat(messages)
+                hypothetical_question = response.message.content.strip()
 
-        llm = self._get_llm()
-        click.echo("  > Calling LLM for hypothetical question...")
-        response = llm.chat(messages)
-        chunk.metadata['hypothetical_question'] = response.message.content
+                # Basic cleaning of the question
+                if hypothetical_question.startswith('"') and hypothetical_question.endswith('"'):
+                    hypothetical_question = hypothetical_question[1:-1]
 
-    def _perform_affective_analysis(self, chunk: BaseNode):
-        """
-        Performs nuanced affective (sentiment) analysis on the chunk.
-        """
-        system_prompt = (
-            "Analyze the affective content of the following text. "
-            "Respond ONLY with a valid JSON object containing three keys:\n"
-            "1. `primary_emotion`: The single strongest emotion (e.g., 'joy', 'sadness', 'anger', 'anxiety', 'frustration', 'neutral').\n"
-            "2. `sentiment_score`: A float from -1.0 (highly negative) to 1.0 (highly positive).\n"
-            "3. `emotion_justification`: A brief explanation (1-2 sentences) for your choices."
-        )
-        user_prompt = f"Text to analyze:\n---\n{chunk.get_content()}"
+                if hypothetical_question:
+                    # Add the new, specific question to this chunk's metadata.
+                    # It inherits existing metadata like 'themes'.
+                    node.metadata['hypothetical_question'] = hypothetical_question
+                    click.secho(f"    > Generated Question: {hypothetical_question}", fg="magenta")
 
-        messages = [
-            ChatMessage(role=MessageRole.SYSTEM, content=system_prompt),
-            ChatMessage(role=MessageRole.USER, content=user_prompt),
-        ]
+                enriched_nodes.append(node)
 
-        llm = self._get_llm()
-        click.echo("  > Calling LLM for affective analysis...")
-        response = llm.chat(messages)
-        response_content = response.message.content
+            except Exception as e:
+                click.secho(f"  > Warning: Could not generate hypothetical question for chunk {i + 1}. Reason: {e}",
+                            fg="yellow")
+                # If enrichment fails, still include the original node.
+                enriched_nodes.append(node)
 
-        try:
-            analysis = json.loads(response_content)
-            chunk.metadata['primary_emotion'] = analysis.get('primary_emotion', 'unknown')
-            chunk.metadata['sentiment_score'] = analysis.get('sentiment_score', 0.0)
-            chunk.metadata['emotion_justification'] = analysis.get('emotion_justification', 'N/A')
-        except json.JSONDecodeError:
-            click.echo(f"  Warning: Failed to decode JSON for affective analysis. Storing raw response.", err=True)
-            chunk.metadata['primary_emotion'] = 'error'
-            chunk.metadata['sentiment_score'] = 0.0
-            chunk.metadata['emotion_justification'] = response_content
+        # Assign the final, enriched chunks to 'primary_nodes' for the vector store.
+        data['primary_nodes'] = enriched_nodes
 
-    def _identify_paraphrases(self, chunk: BaseNode, top_k: int = 5):
-        """
-        Identifies potential paraphrases by searching the vector store and verifying with an LLM.
-        """
-        current_chunk_id = chunk.metadata.get('chunk_id')
-        if not current_chunk_id:
-            return
-
-        try:
-            similar_chunks = self.vector_manager.search(chunk.get_content(), top_k=top_k)
-        except Exception as e:
-            click.echo(f"  Warning: Vector search failed for paraphrase ID: {e}", err=True)
-            return
-
-        system_prompt = (
-            "You will be given two text chunks, Chunk A and Chunk B. "
-            "Do they express the exact same core idea, just in different words? "
-            "Answer ONLY with 'YES' or 'NO'."
-        )
-
-        llm = self._get_llm()
-
-        for result_chunk, _ in similar_chunks:
-            candidate_chunk_id = result_chunk.metadata.get('chunk_id')
-
-            if not candidate_chunk_id or candidate_chunk_id == current_chunk_id:
-                continue
-
-            user_prompt = (
-                f"Chunk A:\n{chunk.get_content()}\n\n"
-                f"Chunk B:\n{result_chunk.get_content()}"
-            )
-
-            messages = [
-                ChatMessage(role=MessageRole.SYSTEM, content=system_prompt),
-                ChatMessage(role=MessageRole.USER, content=user_prompt),
-            ]
-
-            click.echo("  > Calling LLM for paraphrase verification...")
-            response = llm.chat(messages)
-            response_content = response.message.content
-
-            if "yes" in response_content.lower():
-                self.db_manager.add_paraphrase_link(current_chunk_id, candidate_chunk_id)
-
-    def run(self, documents: List[Document]) -> List[Document]:
-        """
-        Executes the enrichment process for each chunk in each document.
-        """
-        click.echo(f"  Starting {self.stage_name}...")
-
-        all_chunks = [chunk for doc in documents for chunk in doc.chunks]
-
-        if not all_chunks:
-            click.echo("    No chunks found to enrich. Skipping Stage 2.")
-            return documents
-
-        click.echo("    Enriching chunks with Hypothetical Questions and Affective Analysis...")
-        with click.progressbar(all_chunks, label="    Enriching") as bar:
-            for chunk in bar:
-                chunk_id = chunk.metadata.get('chunk_id', 'unknown_chunk')
-
-                try:
-                    self._generate_hypothetical_question(chunk)
-                except Exception as e:
-                    click.echo(f"    Warning (Chunk {chunk_id}): Failed to generate hypothetical question: {e}",
-                               err=True)
-
-                try:
-                    self._perform_affective_analysis(chunk)
-                except Exception as e:
-                    click.echo(f"    Warning (Chunk {chunk_id}): Failed to perform affective analysis: {e}", err=True)
-
-        click.echo("    Identifying paraphrases against existing vector store...")
-        with click.progressbar(all_chunks, label="    Finding Paraphrases") as bar:
-            for chunk in bar:
-                chunk_id = chunk.metadata.get('chunk_id', 'unknown_chunk')
-                try:
-                    self._identify_paraphrases(chunk)
-                except Exception as e:
-                    click.echo(f"    Warning (Chunk {chunk_id}): Failed to identify paraphrases: {e}", err=True)
-
-        click.echo(f"  {self.stage_name} complete.")
-        return documents
+        print(f"  > Generated and enriched {len(enriched_nodes)} text chunks.")
+        return data

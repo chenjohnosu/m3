@@ -1,5 +1,6 @@
 import click
 from core.vector_manager import VectorManager
+from utils.config import get_config  # <-- Make sure this is imported
 
 
 @click.group()
@@ -17,7 +18,7 @@ def ingest():
     This will delete all existing vectors and re-process every file.
     """
     try:
-        manager = VectorManager()
+        manager = VectorManager(get_config())  # <-- FIXED
         manager.rebuild_vector_store()
     except Exception as e:
         click.secho(f"🔥 Error: {e}", fg="red")
@@ -36,7 +37,7 @@ def chunks(identifier, include_metadata, pretty, show_summary):
     Example: /vector chunks my_file.txt --pretty
     """
     try:
-        manager = VectorManager()
+        manager = VectorManager(get_config())  # <-- FIXED
         # Pass the new show_summary flag to the manager
         manager.get_file_chunks(identifier, include_metadata, pretty, show_summary)
     except Exception as e:
@@ -47,7 +48,7 @@ def chunks(identifier, include_metadata, pretty, show_summary):
 def status():
     """Displays the status of the vector store."""
     try:
-        manager = VectorManager()
+        manager = VectorManager(get_config())  # <-- FIXED
         manager.get_vector_store_status()
     except Exception as e:
         click.secho(f"🔥 Error: {e}", fg="red")
@@ -59,7 +60,7 @@ def rebuild():
     """DEPRECATED. Use the 'ingest' command instead."""
     click.secho("  > This command is deprecated. Forwarding to 'ingest'...", dim=True)
     try:
-        manager = VectorManager()
+        manager = VectorManager(get_config())  # <-- FIXED
         manager.rebuild_vector_store()
     except Exception as e:
         click.secho(f"🔥 Error: {e}", fg="red")
@@ -70,7 +71,7 @@ def rebuild():
 def create():
     """Creates a new, blank vector store for the project."""
     try:
-        manager = VectorManager()
+        manager = VectorManager(get_config())  # <-- FIXED
         manager.create_vector_store(rebuild=True)
     except Exception as e:
         click.secho(f"🔥 Error: {e}", fg="red")
@@ -84,7 +85,7 @@ def query(query_text):
         click.echo("  > Please provide a query string.")
         return
     try:
-        manager = VectorManager()
+        manager = VectorManager(get_config())  # <-- FIXED
         manager.query_vector_store(" ".join(query_text))
     except Exception as e:
         click.secho(f"🔥 Error: {e}", fg="red")
