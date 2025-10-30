@@ -146,7 +146,7 @@ class CognitiveArchitectPipeline(BasePipeline):  # <-- Corrected from BasePipeli
 
             # 7. Set exclusions
             node.excluded_embed_metadata_keys = list(node.metadata.keys())
-            node.excluded_llm_metadata_key = list(node.metadata.keys())
+            node.excluded_llm_metadata_keys = list(node.metadata.keys())
 
             prepared_nodes.append(node)
 
