@@ -26,7 +26,7 @@ def topk(query_text, k, show_summary):
         manager = AnalyzeManager(get_config())  # <-- MODIFIED
         manager.perform_topk_search(query_text, k, show_summary)
     except Exception as e:
-        click.secho(f"🔥 Error: {e}", fg="red")
+        click.secho(f"櫨 Error: {e}", fg="red")
 
 
 @analyze.command("search")
@@ -47,7 +47,7 @@ def search(query_text, threshold, show_summary):
         manager = AnalyzeManager(get_config())  # <-- MODIFIED
         manager.perform_threshold_search(query_text, threshold, show_summary)
     except Exception as e:
-        click.secho(f"🔥 Error: {e}", fg="red")
+        click.secho(f"櫨 Error: {e}", fg="red")
 
 
 @analyze.command("exact")
@@ -67,7 +67,7 @@ def exact(query_text, include_summary):
         # This flag controls both search and display
         manager.perform_exact_search(query_text, include_summary)
     except Exception as e:
-        click.secho(f"🔥 Error: {e}", fg="red")
+        click.secho(f"櫨 Error: {e}", fg="red")
 
 
 # --- PLUGIN COMMANDS ---
@@ -79,7 +79,7 @@ def tools():
         manager = AnalyzeManager(get_config())  # <-- MODIFIED
         manager.list_plugins()
     except Exception as e:
-        click.secho(f"🔥 Error: {e}", fg="red")
+        click.secho(f"櫨 Error: {e}", fg="red")
 
 
 @analyze.command("run")
@@ -106,6 +106,8 @@ def run(plugin_name, query_text, k, threshold, options, save):  # <-- MODIFIED: 
     /a run summarize "user connection" --k 5 --threshold 0.75
 
     /a run entity "safety concerns" --options="People,Locations"
+
+    /a run interpret
     """
     try:
         manager = AnalyzeManager(get_config())  # <-- MODIFIED
@@ -119,4 +121,4 @@ def run(plugin_name, query_text, k, threshold, options, save):  # <-- MODIFIED: 
             save=save  # <-- MODIFIED: Pass the 'save' flag
         )
     except Exception as e:
-        click.secho(f"🔥 Error: {e}", fg="red")
+        click.secho(f"櫨 Error: {e}", fg="red")
