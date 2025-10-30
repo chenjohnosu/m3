@@ -10,22 +10,25 @@ import hashlib
 
 # LlamaIndex core components
 from llama_index.core import VectorStoreIndex, StorageContext
-from llama_index.core import Settings as LlamaSettings  # <-- MODIFIED
+from llama_index.core import Settings as LlamaSettings
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 import chromadb
 
 # Project-specific components
-from utils.file_reader import read_files
+from utils.file_reader import read_files  # <-- This should be read_files_from_paths
 from core.project_manager import ProjectManager
 from core.llm_manager import LLMManager
 from core.ingestion.pipeline_factory import get_pipeline
-from core.db_manager import get_embed_model, get_chroma_client
+from core.db_manager import get_embed_model, get_chroma_client  # <-- This is from your repo
 
 # E5 models expect cosine similarity
 CHROMA_METADATA = {"hnsw:space": "cosine"}
-# Define metadata keys to HIDE by default
-METADATA_TO_HIDE_DEFAULT = ['holistic_summary', 'original_filename', 'file_path', 'original_text']
+
+
+# --- MODIFIED: Removed the hard-coded default list ---
+# METADATA_TO_HIDE_DEFAULT = ['holistic_summary', 'original_filename', 'file_path', 'original_text']
+# ----------------------------------------------------
 
 
 def get_file_hash(file_path):
@@ -54,23 +57,24 @@ class VectorManager:
 
         os.makedirs(self.corpus_path, exist_ok=True)
 
-        # --- Use db_manager ---
         embed_config = self.config.get('embedding_settings', {})
         model_name = embed_config.get('model_name')
         if not model_name:
             raise ValueError("Embedding model name not found in config.yaml.")
 
-        # --- MODIFIED: Set global LlamaSettings ---
-        # 1. Get the embed model from the db_manager
         self.embed_model = get_embed_model(model_name)
-        # 2. Set it on the global Settings object
-        LlamaSettings.embed_model = self.embed_model  # <-- ADDED
+        LlamaSettings.embed_model = self.embed_model
 
-        # 3. Get the LLM from LLMManager
         llm_manager = LLMManager(self.config)
-        # 4. Set it on the global Settings object
-        LlamaSettings.llm = llm_manager.get_llm('enrichment_model')  # <-- This was already correct
-        # --- END MODIFIED ---
+        LlamaSettings.llm = llm_manager.get_llm('enrichment_model')
+
+        # --- NEW: Load the display hide list from config ---
+        analysis_config = self.config.get('analysis_settings', {})
+        self.metadata_to_hide = analysis_config.get(
+            'metadata_keys_to_hide_display',
+            ['original_filename', 'file_path', 'original_text']  # Fallback default
+        )
+        # -------------------------------------------------
 
         self.client = get_chroma_client(self.chroma_db_path)
 
@@ -106,10 +110,18 @@ class VectorManager:
         """Processes a single file using the Cognitive Architect Pipeline."""
         click.echo(f"\n--- Processing '{Path(file_path_in_corpus).name}' (Type: {doc_type}) ---")
 
+        # Use the correct file reader function from your repo
         documents = read_files([file_path_in_corpus])
         if not documents:
             click.secho("  > Failed to read document.", fg="yellow")
             return
+
+        # --- NEW: Add file_path to metadata before pipeline ---
+        # This is crucial for the pipeline to know the source
+        for doc in documents:
+            doc.metadata['file_path'] = file_path_in_corpus
+            doc.metadata['original_filename'] = Path(file_path_in_corpus).name
+        # ----------------------------------------------------
 
         pipeline = get_pipeline('cogarc', self.config)
         processed_data = pipeline.run(documents, doc_type)
@@ -262,21 +274,23 @@ class VectorManager:
         for i, (doc_content, doc_meta) in enumerate(items):
             click.secho(f"\n[Chunk {i + 1}]", fg="yellow")
 
-            # Get ALL metadata keys
             all_keys = list(doc_meta.keys())
 
-            # Define keys to ALWAYS hide (internal stuff)
-            keys_to_hide = ['original_filename', 'file_path', 'original_text']
+            # --- MODIFIED: Use the config list ---
+            # Use the list loaded from config.yaml in __init__
+            keys_to_hide = self.metadata_to_hide[:]  # Make a copy
 
-            # Conditionally HIDE the summary
+            # Conditionally HIDE or SHOW the summary
             if not show_summary:
-                keys_to_hide.append('holistic_summary')
+                if 'holistic_summary' not in keys_to_hide:
+                    keys_to_hide.append('holistic_summary')
+            else:
+                # If --summary is passed, make sure we DON'T hide it
+                if 'holistic_summary' in keys_to_hide:
+                    keys_to_hide.remove('holistic_summary')
+            # --- END MODIFICATION ---
 
-            # Filter the list
             keys_to_print = [k for k in all_keys if k not in keys_to_hide]
-
-            # --- THIS IS THE FIX ---
-            # Determine if we should print metadata based on flags
             should_print_metadata = (pretty or include_metadata) and keys_to_print
 
             if pretty:
@@ -305,15 +319,12 @@ class VectorManager:
                 click.echo(wrapped_content)
 
             else:  # Not pretty
-                if should_print_metadata:  # If --meta flag is present
+                if should_print_metadata:
                     click.secho("  Metadata:", underline=True)
                     for key in sorted(keys_to_print):
                         click.echo(f"    - {key}: ", nl=False)
                         click.secho(f"{doc_meta.get(key, 'N/A')}", fg="cyan")
-
-                # Always print content if not using --pretty
                 click.echo(doc_meta.get('original_text', doc_content))
-            # --- END FIX ---
 
         click.secho("\n--- End of Chunks ---", bold=True)
 

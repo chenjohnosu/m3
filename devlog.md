@@ -1,2 +1,3 @@
-
-Pipeline is unstable and there are some formatting considerations for communication - investigate --meta/--pretty/--summary
+Need to being the process of implementing the full stack
+Currently working on generating axial meta data with clustering command
+Review rest of v2 cogarc vision and actual implmementation

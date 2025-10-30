@@ -58,3 +58,29 @@ ingestion_config:
     stage_1_model: 'synthesis_model'
     stage_2_model: 'enrichment_model'
     stage_3_model: 'synthesis_model'
+
+# ==============================================================================
+# ANALYSIS SETTINGS
+# ==============================================================================
+analysis_settings:
+  # --- "ALLOW LIST" ---
+  # Defines which metadata keys should be EMBEDDED with the chunk content
+  # to make them searchable in topk, search, and clustering.
+  metadata_keys_to_embed:
+    - 'themes'
+    - 'hypothetical_question'
+    - 'axial_theme'
+
+  # --- "IGNORE LIST" ---
+  # Defines which metadata keys to HIDE by default when displaying chunks.
+  # These are identifiers or redundant fields not useful for display.
+  metadata_keys_to_hide_display:
+    - 'holistic_summary'
+    - 'original_filename'
+    - 'file_path'
+    - 'original_text'
+    - 'cluster_id'
+    - 'file_type'
+    - 'chunk_id'
+    - 'chunk_total'
+    - 'hash'
