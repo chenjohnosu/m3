@@ -78,7 +78,7 @@ class ClusteringPlugin(BaseAnalyzerPlugin):
 
         # --- 3. Get LLM from manager ---
         try:
-            llm = manager.llm
+            llm = manager.get_llm('synthesis_model')
             if not llm:
                 raise ValueError("LLM is not available via AnalyzeManager.")
         except Exception as e:
@@ -88,7 +88,7 @@ class ClusteringPlugin(BaseAnalyzerPlugin):
         # --- 4. Get All Data from Vector Store ---
         try:
             all_data = manager.collection.get(
-                include=["embeddings", "metadatas", "documents", "ids"]
+                include=["embeddings", "metadatas", "documents"]
             )
         except Exception as e:
             click.secho(f"🔥 Error: Could not retrieve data from vector store: {e}", fg="red")

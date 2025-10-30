@@ -13,6 +13,9 @@ llama-index-vector-stores-chroma
 
 # Analysis
 scikit-learn
+pandas
+matplotlib
+seaborn
 
 # Document Parsing
 unstructured[local-inference]
