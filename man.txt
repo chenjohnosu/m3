@@ -1,12 +1,15 @@
-Here are the updated help files with the new `analyze` subcommands.
+Here are the drop-in replacements for the help files, updated to include your new `interpret` plugin.
 
-### **`cli/analyze_commands.py`**
+-----
 
-This file is updated with the new `tools` and `run` commands.
+### `cli/analyze_commands.py`
+
+I've added the new `interpret` command to the "Examples" section of the `run` command's help string.
 
 ```python
 import click
 from core.analyze_manager import AnalyzeManager
+from utils.config import get_config  # <-- IMPORT ADDED
 
 
 @click.group()
@@ -29,16 +32,16 @@ def topk(query_text, k, show_summary):
     Example: /analyze topk "connection" --k 5
     """
     try:
-        manager = AnalyzeManager()
+        manager = AnalyzeManager(get_config())  # <-- MODIFIED
         manager.perform_topk_search(query_text, k, show_summary)
     except Exception as e:
-        click.secho(f"🔥 Error: {e}", fg="red")
+        click.secho(f"櫨 Error: {e}", fg="red")
 
 
 @analyze.command("search")
 @click.argument('query_text')
-@click.option('--threshold', default=1.0, type=float,
-              help='The similarity threshold (L2 Distance). Finds all chunks with a score *less than* this value. Default is 1.0.')
+@click.option('--threshold', default=0.7, type=float,
+              help='The similarity threshold (0.0 to 1.0). Finds all chunks with a score *greater than* this value.')
 @click.option('--summary', 'show_summary', is_flag=True, help='Also show holistic summaries in results.')
 def search(query_text, threshold, show_summary):
     """
@@ -50,10 +53,10 @@ def search(query_text, threshold, show_summary):
     Example: /analyze search "grounded theory" --threshold 0.8
     """
     try:
-        manager = AnalyzeManager()
+        manager = AnalyzeManager(get_config())  # <-- MODIFIED
         manager.perform_threshold_search(query_text, threshold, show_summary)
     except Exception as e:
-        click.secho(f"🔥 Error: {e}", fg="red")
+        click.secho(f"櫨 Error: {e}", fg="red")
 
 
 @analyze.command("exact")
@@ -69,56 +72,84 @@ def exact(query_text, include_summary):
     Example: /analyze exact "professors" --summary
     """
     try:
-        manager = AnalyzeManager()
+        manager = AnalyzeManager(get_config())  # <-- MODIFIED
         # This flag controls both search and display
         manager.perform_exact_search(query_text, include_summary)
     except Exception as e:
-        click.secho(f"🔥 Error: {e}", fg="red")
+        click.secho(f"櫨 Error: {e}", fg="red")
 
 
-# --- NEW PLUGIN COMMANDS ---
+# --- PLUGIN COMMANDS ---
 
 @analyze.command("tools")
 def tools():
     """Lists all available Phase 2 analysis plugins."""
     try:
-        manager = AnalyzeManager()
+        manager = AnalyzeManager(get_config())  # <-- MODIFIED
         manager.list_plugins()
     except Exception as e:
-        click.secho(f"🔥 Error: {e}", fg="red")
+        click.secho(f"櫨 Error: {e}", fg="red")
 
 
 @analyze.command("run")
 @click.argument('plugin_name')
-# Add more options here as your plugins become more complex
-# @click.option('--k', default=5, type=int, help='Number of clusters (for clustering plugin).')
-def run(plugin_name):
+@click.argument('query_text', required=False)
+@click.option('--k', default=5, type=int,
+              help='Number of items (e.g., clusters, outliers, or top chunks for LLM).')
+@click.option('--threshold', default=0.7, type=float,
+              help='Similarity threshold for LLM plugins (0.0 to 1.0).')
+@click.option('--options', help='Comma-separated options for plugins (e.g., categories).')
+# --- NEW: Add the --save flag ---
+@click.option('--save', is_flag=True, default=False, help="Persist analysis results back to metadata (if supported).")
+# ---------------------------------
+def run(plugin_name, query_text, k, threshold, options, save):  # <-- MODIFIED: Added 'save'
     """
-    Runs a specific analysis plugin (e.g., clustering).
+    Runs a specific analysis plugin.
 
-    Example: /analyze run clustering
+    Examples:
+
+    /a run clustering --k 3
+
+    /a run clustering --k 3 --save
+
+    /a run summarize "user connection" --k 5 --threshold 0.75
+
+    /a run entity "safety concerns" --options="People,Locations"
+
+    /a run interpret
     """
     try:
-        manager = AnalyzeManager()
-        # Pass any extra CLI options as kwargs
-        manager.run_plugin(plugin_name) # e.g., manager.run_plugin(plugin_name, k=k)
+        manager = AnalyzeManager(get_config())  # <-- MODIFIED
+        # Pass all args as keyword arguments
+        manager.run_plugin(
+            plugin_name,
+            query_text=query_text,
+            k=k,
+            threshold=threshold,
+            options=options,
+            save=save  # <-- MODIFIED: Pass the 'save' flag
+        )
     except Exception as e:
-        click.secho(f"🔥 Error: {e}", fg="red")
+        click.secho(f"櫨 Error: {e}", fg="red")
+
 ```
 
 -----
 
-### **`man.txt`**
+### `man.txt`
 
-I've updated the `analyze` command section to reflect the new subcommands: `topk`, `search`, `exact`, `tools`, and `run`.
+I've added the new `interpret` plugin to the `analyze` command section.
 
 ```
-M3(1)                            User Manuals                            M3(1)NAMEm3 - a local-first document analysis toolkitSYNOPSISm3 [OPTIONS] COMMAND [ARGS]...   m3 --go
+M3(1)
+           User Manuals                            M3(1)NAMEm3 - a local-first document analysis toolkitSYNOPSISm3 [OPTIONS] COMMAND [ARGS]...   m3 --go
 
    m3 --batch <FILENAME>
 DESCRIPTIONm3 (monkey3) is a command-line tool designed for managing andpreparing collections of text documents for semantic analysis.
-Itprovides a project-based workflow to ingest documents in variousformats (.txt, .pdf, .docx), track their versions, and convert theircontent into a searchable vector store using local, self-hostedembedding models.MODES OF OPERATIONCommand-line modeExecute a single command and exit.
-This is the default mode.   Interactive mode (--go)
+Itprovides a project-based workflow to ingest documents in variousformats (.txt, .pdf, .docx), track their versions, and convert theircontent into a searchable vector store using local, self-hostedembedding
+models.MODES OF OPERATIONCommand-line modeExecute a single command and exit.
+This is the default mode.
+Interactive mode (--go)
           Enter a read-eval-print loop (REPL) for executing multiple
           commands in a session.
 In this mode, all commands must be
@@ -182,16 +213,18 @@ Useful for debugging the text-splitting
                  process.
 analyze
           Commands for analyzing project data.
-          topk <QUERY> [--k N]
+topk <QUERY> [--k N]
                  Finds the Top-K most semantically similar chunks.
-          search <QUERY> [--threshold N]
+search <QUERY> [--threshold N]
                  Finds all chunks that meet a similarity threshold.
-          exact <QUERY_TERM>
+exact <QUERY_TERM>
                  Finds all chunks with an exact string match.
-          tools
+tools
                  Lists all available analysis plugins.
-          run <PLUGIN_NAME>
+run <PLUGIN_NAME>
                  Runs a specific analysis plugin.
+run interpret
+                 Synthesizes all document summaries into a meta-summary.
 CONFIGURATION
     The main configuration is stored in ~/.monkey3/config.yaml.
 This file
