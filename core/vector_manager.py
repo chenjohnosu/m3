@@ -59,11 +59,9 @@ class VectorManager:
         self.embed_model = get_embed_model(model_name)
         LlamaSettings.embed_model = self.embed_model
 
-        # --- MODIFIED: Create and store the LLM manager ---
-        # This will print the "Instantiating LLM..." messages
+        # Create and store the LLM manager
         self.llm_manager = LLMManager(self.config)
         LlamaSettings.llm = self.llm_manager.get_llm('enrichment_model')
-        # --- END MODIFICATION ---
 
         # Load the display hide list from config
         analysis_config = self.config.get('analysis_settings', {})
@@ -84,15 +82,12 @@ class VectorManager:
 
         self.index = VectorStoreIndex.from_documents([], storage_context=self.storage_context)
 
-        # --- NEW: Initialize the ingestion pipeline once ---
+        # Initialize the ingestion pipeline once
         try:
-            # This will print "Initializing Cognitive Architect Pipeline..."
-            # It receives the already-loaded LLM Manager
             self.ingestion_pipeline = get_pipeline('cogarc', self.config, self.llm_manager)
         except Exception as e:
             click.secho(f"Warning: Could not initialize ingestion pipeline: {e}", fg="yellow", err=True)
             self.ingestion_pipeline = None
-        # --- END NEW SECTION ---
 
     def _load_metadata(self):
         if not os.path.exists(self.metadata_path):
@@ -115,26 +110,20 @@ class VectorManager:
         """Processes a single file using the pre-loaded Cognitive Architect Pipeline."""
         click.echo(f"\n--- Processing '{Path(file_path_in_corpus).name}' (Type: {doc_type}) ---")
 
-        # Use the correct file reader function
         documents = read_files([file_path_in_corpus])
         if not documents:
             click.secho("  > Failed to read document.", fg="yellow")
             return
 
-        # Add file_path to metadata before pipeline
         for doc in documents:
             doc.metadata['file_path'] = file_path_in_corpus
             doc.metadata['original_filename'] = Path(file_path_in_corpus).name
 
-        # --- MODIFIED: Use the cached pipeline ---
         if not self.ingestion_pipeline:
             click.secho("  > Error: Ingestion pipeline is not available. Aborting file processing.", fg="red")
             return
 
-        # No new LLMs will be loaded here.
         processed_data = self.ingestion_pipeline.run(documents, doc_type)
-        # --- END MODIFICATION ---
-
         nodes = processed_data.get('primary_nodes', [])
 
         if nodes:
@@ -173,7 +162,6 @@ class VectorManager:
                 }
                 click.echo(f"  > Added '{file_path.name}' to corpus manifest.")
                 self._save_metadata(metadata)
-                # This will use the pre-loaded pipeline
                 self._process_and_ingest_file(str(destination_path), doc_type)
 
     def remove_from_corpus(self, identifier):
@@ -292,15 +280,12 @@ class VectorManager:
 
             all_keys = list(doc_meta.keys())
 
-            # Use the list loaded from config.yaml in __init__
             keys_to_hide = self.metadata_to_hide[:]  # Make a copy
 
-            # Conditionally HIDE or SHOW the summary
             if not show_summary:
                 if 'holistic_summary' not in keys_to_hide:
                     keys_to_hide.append('holistic_summary')
             else:
-                # If --summary is passed, make sure we DON'T hide it
                 if 'holistic_summary' in keys_to_hide:
                     keys_to_hide.remove('holistic_summary')
 
@@ -348,7 +333,10 @@ class VectorManager:
         if not target_doc_id:
             return False, f"File '{identifier}' not found in the corpus manifest."
 
-        original_filename = Path(meta.get('original_path', 'Unknown')).name
+        # --- THIS IS THE FIX ---
+        # The variable is now 'original_name' to match the return key
+        original_name = Path(meta.get('original_path', 'Unknown')).name
+        # --- END FIX ---
 
         results = self.collection.get(
             where={"file_path": target_doc_id},
@@ -358,13 +346,16 @@ class VectorManager:
 
         metadatas = results.get('metadatas')
         if not metadatas:
-            return False, f"No chunks or metadata found for '{original_filename}'. Has it been ingested?"
+            return False, f"No chunks or metadata found for '{original_name}'. Has it been ingested?"
 
         summary = metadatas[0].get('holistic_summary')
         if not summary:
-            return False, f"No holistic summary found for '{original_filename}'."
+            return False, f"No holistic summary found for '{original_name}'."
 
+        # --- THIS IS THE FIX ---
+        # The variable 'original_name' now correctly matches the key.
         return True, {"original_name": original_name, "summary": summary}
+        # --- END FIX ---
 
     def query_vector_store(self, query_text):
         click.echo(f"Querying project '{self.project_name}' for: '{query_text}'")
