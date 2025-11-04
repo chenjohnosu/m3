@@ -11,6 +11,7 @@ import hashlib
 # LlamaIndex core components
 from llama_index.core import VectorStoreIndex, StorageContext
 from llama_index.core import Settings as LlamaSettings
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 import chromadb
 
@@ -20,6 +21,8 @@ from core.project_manager import ProjectManager
 from core.llm_manager import LLMManager
 from core.ingestion.pipeline_factory import get_pipeline
 from core.db_manager import get_embed_model, get_chroma_client
+from utils.config import get_config
+
 
 # E5 models expect cosine similarity
 CHROMA_METADATA = {"hnsw:space": "cosine"}
@@ -34,17 +37,31 @@ def get_file_hash(file_path):
 
 
 class VectorManager:
-    def __init__(self, config=None):
-        from utils.config import get_config
-        self.config = config or get_config()
-        self.project_manager = ProjectManager()
+    def __init__(self, config=None, project_name=None, project_path=None, llm_manager=None):
 
-        active_project_name, active_project_path = self.project_manager.get_active_project()
-        if not active_project_path:
-            raise Exception("No active project set. Please use 'm3 project active <name>'.")
+        # --- FALLBACK FOR SINGLE-COMMAND/BATCH MODE ---
+        if not config:
+            self.config = get_config()
+        else:
+            self.config = config
 
-        self.project_name = active_project_name
-        self.project_path = active_project_path
+        if not project_name or not project_path:
+            self.project_manager = ProjectManager()
+            active_project_name, active_project_path = self.project_manager.get_active_project()
+            if not active_project_path:
+                raise Exception("No active project set. Please use 'm3 project active <name>'.")
+            self.project_name = active_project_name
+            self.project_path = active_project_path
+        else:
+            self.project_name = project_name
+            self.project_path = project_path
+
+        if not llm_manager:
+            self.llm_manager = LLMManager(self.config)
+        else:
+            self.llm_manager = llm_manager
+        # --- END FALLBACK ---
+
         self.corpus_path = os.path.join(self.project_path, "corpus")
         self.metadata_path = os.path.join(self.project_path, 'corpus_metadata.json')
         self.chroma_db_path = os.path.join(self.project_path, "chroma_db")
@@ -59,15 +76,13 @@ class VectorManager:
         self.embed_model = get_embed_model(model_name)
         LlamaSettings.embed_model = self.embed_model
 
-        # Create and store the LLM manager
-        self.llm_manager = LLMManager(self.config)
+        # Use the passed-in LLMManager
         LlamaSettings.llm = self.llm_manager.get_llm('enrichment_model')
 
-        # Load the display hide list from config
         analysis_config = self.config.get('analysis_settings', {})
         self.metadata_to_hide = analysis_config.get(
             'metadata_keys_to_hide_display',
-            ['original_filename', 'file_path', 'original_text']  # Fallback default
+            ['original_filename', 'file_path', 'original_text']
         )
 
         self.client = get_chroma_client(self.chroma_db_path)
@@ -82,13 +97,7 @@ class VectorManager:
 
         self.index = VectorStoreIndex.from_documents([], storage_context=self.storage_context)
 
-        # Initialize the ingestion pipeline once
-        try:
-            self.ingestion_pipeline = get_pipeline('cogarc', self.config, self.llm_manager)
-        except Exception as e:
-            click.secho(f"Warning: Could not initialize ingestion pipeline: {e}", fg="yellow", err=True)
-            self.ingestion_pipeline = None
-
+    # ... (rest of file) ...
     def _load_metadata(self):
         if not os.path.exists(self.metadata_path):
             return {}
@@ -107,7 +116,7 @@ class VectorManager:
         return None, None
 
     def _process_and_ingest_file(self, file_path_in_corpus, doc_type):
-        """Processes a single file using the pre-loaded Cognitive Architect Pipeline."""
+        """Processes a single file using the Cognitive Architect Pipeline."""
         click.echo(f"\n--- Processing '{Path(file_path_in_corpus).name}' (Type: {doc_type}) ---")
 
         documents = read_files([file_path_in_corpus])
@@ -119,11 +128,12 @@ class VectorManager:
             doc.metadata['file_path'] = file_path_in_corpus
             doc.metadata['original_filename'] = Path(file_path_in_corpus).name
 
-        if not self.ingestion_pipeline:
-            click.secho("  > Error: Ingestion pipeline is not available. Aborting file processing.", fg="red")
-            return
+        # --- THIS IS THE FIX ---
+        # We must pass the session's llm_manager to the pipeline
+        pipeline = get_pipeline('cogarc', self.config, self.llm_manager)
+        # --- END FIX ---
 
-        processed_data = self.ingestion_pipeline.run(documents, doc_type)
+        processed_data = pipeline.run(documents, doc_type)
         nodes = processed_data.get('primary_nodes', [])
 
         if nodes:
@@ -135,11 +145,6 @@ class VectorManager:
         click.echo("--- Finished Processing ---")
 
     def add_to_corpus(self, paths, doc_type):
-        """
-        Adds one or more files to the corpus.
-        The VectorManager (and its pipeline) is already initialized,
-        so this loop just processes files.
-        """
         metadata = self._load_metadata()
         for path_str in paths:
             path = Path(path_str)
@@ -252,6 +257,8 @@ class VectorManager:
             if os.path.exists(self.chroma_db_path):
                 shutil.rmtree(self.chroma_db_path)
             os.makedirs(self.chroma_db_path)
+            # Re-init is now tricky. This will re-call the (slow) fallback.
+            # This command is less critical in interactive mode.
             self.__init__(self.config)
             self._save_metadata({})
             click.secho("✅ New blank vector store created.", fg="green")
@@ -280,7 +287,7 @@ class VectorManager:
 
             all_keys = list(doc_meta.keys())
 
-            keys_to_hide = self.metadata_to_hide[:]  # Make a copy
+            keys_to_hide = self.metadata_to_hide[:]
 
             if not show_summary:
                 if 'holistic_summary' not in keys_to_hide:
@@ -333,10 +340,7 @@ class VectorManager:
         if not target_doc_id:
             return False, f"File '{identifier}' not found in the corpus manifest."
 
-        # --- THIS IS THE FIX ---
-        # The variable is now 'original_name' to match the return key
-        original_name = Path(meta.get('original_path', 'Unknown')).name
-        # --- END FIX ---
+        original_filename = Path(meta.get('original_path', 'Unknown')).name
 
         results = self.collection.get(
             where={"file_path": target_doc_id},
@@ -346,16 +350,13 @@ class VectorManager:
 
         metadatas = results.get('metadatas')
         if not metadatas:
-            return False, f"No chunks or metadata found for '{original_name}'. Has it been ingested?"
+            return False, f"No chunks or metadata found for '{original_filename}'. Has it been ingested?"
 
         summary = metadatas[0].get('holistic_summary')
         if not summary:
-            return False, f"No holistic summary found for '{original_name}'."
+            return False, f"No holistic summary found for '{original_filename}'."
 
-        # --- THIS IS THE FIX ---
-        # The variable 'original_name' now correctly matches the key.
-        return True, {"original_name": original_name, "summary": summary}
-        # --- END FIX ---
+        return True, {"original_name": original_filename, "summary": summary}
 
     def query_vector_store(self, query_text):
         click.echo(f"Querying project '{self.project_name}' for: '{query_text}'")

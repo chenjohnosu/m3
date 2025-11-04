@@ -27,36 +27,53 @@ class AnalyzeManager:
     Handles all analysis tasks for the currently active project.
     """
 
-    def __init__(self, config=None):
-        self.project_manager = ProjectManager()
-        active_project_name, active_project_path = self.project_manager.get_active_project()
+    def __init__(self, config=None, project_name=None, project_path=None, llm_manager=None, plugin_manager=None):
 
-        if not active_project_path:
-            raise Exception("No active project set. Please use 'm3 project active <name>'.")
+        # --- FALLBACK FOR SINGLE-COMMAND/BATCH MODE ---
+        if not config:
+            self.config = get_config()
+        else:
+            self.config = config
 
-        click.echo(f"AnalyzeManager: Operating on project '{active_project_name}'")
-        self.project_name = active_project_name
-        self.project_path = active_project_path
+        if not project_name or not project_path:
+            self.project_manager = ProjectManager()
+            active_project_name, active_project_path = self.project_manager.get_active_project()
+            if not active_project_path:
+                raise Exception("No active project set. Please use 'm3 project active <name>'.")
+            self.project_name = active_project_name
+            self.project_path = active_project_path
+        else:
+            self.project_name = project_name
+            self.project_path = project_path
 
-        self.config = config or get_config()
+        if not llm_manager:
+            self.llm_manager = LLMManager(self.config)
+        else:
+            self.llm_manager = llm_manager
 
-        # --- Initialize the vector store for querying via Global Manager ---
+        if not plugin_manager:
+            self.plugin_manager = PluginManager()
+        else:
+            self.plugin_manager = plugin_manager
+        # --- END FALLBACK ---
+
+
+        click.echo(f"AnalyzeManager: Operating on project '{self.project_name}'", err=True)
+
         embed_config = self.config.get('embedding_settings', {})
         model_name = embed_config.get('model_name')
         if not model_name:
             raise ValueError("Embedding model name not found in config.yaml.")
 
-        # --- MODIFIED: Set global LlamaSettings ---
-        # 1. Get the embed model from the db_manager
         self.embed_model = get_embed_model(model_name)
-        # 2. Set it on the global Settings object
         LlamaSettings.embed_model = self.embed_model
-        # --- END MODIFIED ---
 
         self.chroma_db_path = os.path.join(self.project_path, "chroma_db")
-        if not os.path.exists(self.chroma_db_path):
-            raise Exception(
-                f"Vector store not found for project '{self.project_name}'. Please run '/corpus add' or '/corpus ingest'.")
+
+        # --- THIS IS THE FIX ---
+        # The check for os.path.exists(self.chroma_db_path) has been REMOVED.
+        # We now trust get_chroma_client and get_or_create_collection
+        # to handle the creation of the DB, just as VectorManager does.
 
         self.client = get_chroma_client(self.chroma_db_path)
 
@@ -64,39 +81,27 @@ class AnalyzeManager:
             name="m3_collection",
             metadata=CHROMA_METADATA
         )
+        # --- END FIX ---
 
         self.vector_store = ChromaVectorStore(chroma_collection=self.collection)
         self.index = VectorStoreIndex.from_vector_store(self.vector_store)
 
-        # --- Initialize LLM Manager ---
         try:
-            self.llm_manager = LLMManager(self.config)
-
-            # --- MODIFIED: Set global LLM settings ---
-            # 3. Set the global LLM from the manager
-            #    We use the enrichment_model by default for analysis tasks
             llm_key = self.config.get('ingestion_config', {}) \
                 .get('cogarc_settings', {}) \
                 .get('stage_2_model', 'enrichment_model')
             LlamaSettings.llm = self.llm_manager.get_llm(llm_key)
-            # --- END MODIFIED ---
-
         except Exception as e:
             click.secho(f"Warning: Could not initialize LLMManager: {e}", fg="yellow")
             click.secho("  > LLM-based plugins (summarize, extract, etc.) will not work.", fg="yellow")
-            self.llm_manager = None
 
-    # --- NEW: Helper method for plugins ---
     def get_llm(self, model_key='synthesis_model'):
         """
         Retrieves a designated LLM instance from the LLMManager.
-        'synthesis_model' is used by default for complex analysis.
         """
         if not self.llm_manager:
             raise Exception("LLMManager is not initialized. Check config.yaml.")
 
-        # Look up the model from config
-        # This will default to the key 'synthesis_model' if not found
         llm_model_key = self.config.get('ingestion_config', {}) \
             .get('cogarc_settings', {}) \
             .get(model_key, 'synthesis_model')
@@ -107,7 +112,6 @@ class AnalyzeManager:
     def perform_topk_search(self, query_text, k, show_summary=False):
         """
         Core logic for /analyze topk
-        Searches the embedded text (Content + Themes by default)
         """
         click.echo(f"==> Task: Finding Top {k} chunks for '{query_text}'")
         click.echo(f"==> (Searching embedded text: Content + Themes)")
@@ -121,9 +125,8 @@ class AnalyzeManager:
     def perform_threshold_search(self, query_text, threshold, show_summary=False):
         """
         Core logic for /analyze search
-        Searches the embedded text (Content + Themes by default)
         """
-        if threshold == 1.0:  # 1.0 was the old default
+        if threshold == 1.0:
             threshold = 0.7
 
         click.echo(f"==> Task: Finding all chunks for '{query_text}' with score > {threshold}")
@@ -143,8 +146,6 @@ class AnalyzeManager:
     def perform_exact_search(self, query_text, include_summary=False):
         """
         Core logic for /analyze exact
-        Performs a case-sensitive keyword search.
-        If --summary is used, runs two queries and merges results.
         """
         search_scope = "Content + Themes"
         if include_summary:
@@ -153,7 +154,6 @@ class AnalyzeManager:
         click.echo(f"==> Task: Finding all chunks with exact text '{query_text}'")
         click.echo(f"==> (Searching fields: {search_scope})")
 
-        # Query 1: Search the embedded document text (Content + Themes)
         results_doc = self.collection.get(
             where_document={"$contains": query_text},
             include=["documents", "metadatas"]
@@ -167,13 +167,11 @@ class AnalyzeManager:
         }
 
         if include_summary:
-            # Query 2: Search the 'holistic_summary' metadata field
             results_meta = self.collection.get(
                 where={"holistic_summary": {"$contains": query_text}},
                 include=["documents", "metadatas"]
             )
 
-            # Merge results, avoiding duplicates
             for i, doc_id in enumerate(results_meta.get('ids', [])):
                 if doc_id not in found_ids:
                     found_ids.add(doc_id)
@@ -196,8 +194,6 @@ class AnalyzeManager:
     def _print_nodes(self, nodes_with_scores: list[NodeWithScore], title: str, show_summary=False):
         """
         Helper function to pretty-print search results.
-        Displays 'original_text' from metadata for content.
-        Conditionally displays 'holistic_summary'.
         """
         click.secho(f"\n--- {title} ---", bold=True)
 
@@ -212,9 +208,7 @@ class AnalyzeManager:
 
             click.secho(f"\n[Chunk {i + 1}]", fg="yellow", bold=True)
 
-            # --- Print Metadata ---
             click.echo("  ", nl=False)
-
             if not math.isnan(score):
                 click.secho(f"Score (Cosine Similarity): {score:.4f}", fg="cyan", nl=False)
                 click.echo(" (higher is better, 1.0 = perfect match)")
@@ -225,31 +219,23 @@ class AnalyzeManager:
             click.secho(f"Source: ", nl=False)
             click.secho(f"{metadata.get('original_filename', 'Unknown')}", fg="green")
 
-            # Get ALL metadata keys
             all_keys = list(metadata.keys())
-
-            # Define keys to ALWAYS hide (internal stuff)
             keys_to_hide = ['original_filename', 'file_path', 'original_text']
 
-            # Conditionally HIDE the summary
             if not show_summary:
                 keys_to_hide.append('holistic_summary')
 
-            # Filter the list
             keys_to_print = [k for k in all_keys if k not in keys_to_hide]
 
             for key in sorted(keys_to_print):
-                if key in metadata:  # Check if key exists before printing
+                if key in metadata:
                     click.echo("  ", nl=False)
-                    title = key.replace("_", " ").title()
-                    click.secho(f"{title}: ", nl=False)
+                    title_key = key.replace("_", " ").title()
+                    click.secho(f"{title_key}: ", nl=False)
                     click.secho(f"{metadata[key]}", fg="magenta")
 
-            # --- Print Content ---
             click.secho("  Content:", underline=True)
-
             content_to_display = metadata.get('original_text', node.get_content())
-
             content_indent = "    "
             wrapped_content = textwrap.fill(
                 content_to_display,
@@ -261,21 +247,19 @@ class AnalyzeManager:
 
         click.secho("\n--- End of Results ---", bold=True)
 
-    # --- PLUGIN METHODS ---
 
     def list_plugins(self):
         """
-        Loads and displays all available analysis plugins.
+        (DEPRECATED) This is now handled by the 'tools' command
+        in cli_analyze.py, which uses the session's plugin_manager.
         """
         click.secho("--- Available Analysis Tools ---", bold=True)
-        manager = PluginManager()
-        plugins = manager.get_plugins()
+        plugins = self.plugin_manager.get_plugins()
 
         if not plugins:
             click.secho("No plugins found in the 'plugins' directory.", fg="yellow")
             return
 
-        # Find the longest key for formatting
         max_key_len = max(len(key) for key in plugins.keys()) if plugins else 0
 
         for key, plugin in sorted(plugins.items()):
@@ -287,18 +271,16 @@ class AnalyzeManager:
         Core logic for /analyze run <plugin_name>
         Finds and executes the specified analyzer plugin.
         """
-        manager = PluginManager()
-        plugin = manager.get_plugin(plugin_name)
+        plugin = self.plugin_manager.get_plugin(plugin_name)
 
         if not plugin:
             click.secho(f"🔥 Error: Plugin '{plugin_name}' not found.", fg="red")
-            available = ", ".join(manager.get_plugins().keys())
+            available = ", ".join(self.plugin_manager.get_plugins().keys())
             click.echo(f"  > Available plugins: {available}")
             return
 
         try:
-            # Pass this instance of AnalyzeManager (self) to the plugin
-            # along with any other kwargs (like query_text, k, options)
             plugin.analyze(self, **kwargs)
         except Exception as e:
             click.secho(f"🔥 Error during plugin execution: {e}", fg="red")
+            raise e # Re-raise for the REPL to catch

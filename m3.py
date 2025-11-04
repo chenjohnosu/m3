@@ -1,14 +1,16 @@
 import click
 import shlex
 import sys
+import uuid
+import contextlib
+import traceback
 
 from cli.project_commands import project
 from cli.corpus_commands import corpus
 from cli.vector_commands import vector
 from cli.analyze_commands import analyze
-# Import the new ProjectManager to get the active project correctly
-from core.project_manager import ProjectManager
-
+# Import the new session manager
+from core.session_manager import M3Session
 
 @click.group(invoke_without_command=True)
 @click.option('--go', is_flag=True, help='Enters interactive mode.')
@@ -20,8 +22,12 @@ def cli(ctx, go, batch_file):
     """
     if ctx.invoked_subcommand is None:
         if go:
-            interactive_mode()
+            # Pass a new M3Session into the context object
+            # This is the core of the optimization
+            interactive_mode(M3Session())
         elif batch_file:
+            # Batch mode does not get the optimization, as it runs
+            # commands as separate processes anyway.
             batch_mode(batch_file)
         else:
             click.echo(ctx.get_help())
@@ -59,12 +65,9 @@ def show_subcommand_help(command_path):
         click.echo(cmd_obj.get_help(ctx))
 
 
-def interactive_mode():
+def interactive_mode(session: M3Session):
     """Starts a clean, simplified interactive REPL session."""
     click.echo("Entering interactive mode. Use '/quit' or '/q' to exit.")
-
-    # Instantiate the ProjectManager once to use in the loop
-    project_manager = ProjectManager()
 
     # --- NEW: Alias mapping ---
     command_aliases = {
@@ -72,13 +75,12 @@ def interactive_mode():
         'p': 'project',
         'v': 'vector',
         'q': 'quit',
-        'a': 'analyze'  # <<< THIS IS THE ADDED ALIAS
+        'a': 'analyze'
     }
 
     while True:
-        # Get the active project using the manager
-        active_project, _ = project_manager.get_active_project()
-        prompt = f"[m3:{active_project}]> " if active_project else "[m3]> "
+        # Get prompt from the session
+        prompt = session.get_project_prompt()
 
         try:
             command = input(prompt).strip()
@@ -119,10 +121,14 @@ def interactive_mode():
             # If a group command is entered without a subcommand, show its help.
             cmd_obj = cli.get_command(click.Context(cli), cmd)
             if isinstance(cmd_obj, click.Group) and len(args) == 1:
+                # Pass the session object to the help context
+                ctx = click.Context(cmd_obj, info_name=cmd)
+                ctx.obj = session
                 show_subcommand_help(cmd)
                 continue
 
-            with cli.make_context(cli.name, args, resilient_parsing=True) as ctx:
+            # --- MODIFIED: Pass the session object (ctx.obj) to the command ---
+            with cli.make_context(cli.name, args, resilient_parsing=True, obj=session) as ctx:
                 cli.invoke(ctx)
 
         except (EOFError, KeyboardInterrupt):
@@ -138,14 +144,20 @@ def interactive_mode():
 
 
 def batch_mode(filename):
-    """Executes commands from a batch file."""
+    """
+    Executes commands from a batch file.
+    NOTE: This mode does NOT use the persistent session and will be slower,
+    as each command is invoked in a clean context.
+    """
     click.echo(f"Executing commands from '{filename}'...")
+    click.secho("  > Batch mode runs without a persistent session.", dim=True)
     with open(filename, 'r') as f:
         for line in f:
             command = line.strip()
             if command and not command.startswith('#'):
                 args = shlex.split(command)
                 click.echo(f"==> {command}")
+                # We do *not* pass ctx.obj here.
                 with cli.make_context(cli.name, args, resilient_parsing=True) as ctx:
                     try:
                         cli.invoke(ctx)
@@ -162,4 +174,4 @@ cli.add_command(vector)
 cli.add_command(analyze)
 
 if __name__ == '__main__':
-    cli(obj={})
+    cli(obj={}) # obj={} is the default for non-interactive mode

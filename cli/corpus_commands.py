@@ -17,7 +17,8 @@ def corpus():
               type=click.Choice(get_config().get('ingestion_config', {}).get('known_doc_types', ['document'])),
               default=None,
               help='The type of document being added.')
-def add(paths, doc_type):
+@click.pass_context
+def add(ctx, paths, doc_type):
     """Adds one or more files/directories to the active project's corpus."""
     if not paths:
         click.echo("Error: No file paths provided.")
@@ -29,7 +30,19 @@ def add(paths, doc_type):
         click.echo(f"No --type specified, using default: '{doc_type}'")
 
     try:
-        manager = VectorManager(config)  # <-- Correct
+        # --- MODIFIED ---
+        # Get manager from session or create new (for batch/single command)
+        if ctx.obj and hasattr(ctx.obj, 'vector_manager'):
+            manager = ctx.obj.vector_manager
+        else:
+            click.secho("  > (Single Command Mode) Initializing VectorManager...", dim=True)
+            manager = VectorManager(config)
+
+        if not manager:
+            click.secho("Error: No active project. Please use '/project active <name>'.", fg="red")
+            return
+        # --- END MODIFIED ---
+
         manager.add_to_corpus(list(paths), doc_type)
         click.secho(f"\n✅ Successfully added and processed {len(paths)} path(s).", fg="green")
     except Exception as e:
@@ -38,10 +51,22 @@ def add(paths, doc_type):
 
 @corpus.command('remove')
 @click.argument('identifier')
-def remove(identifier):
+@click.pass_context
+def remove(ctx, identifier):
     """Removes a file from the corpus by its original filename or ID."""
     try:
-        manager = VectorManager(get_config())  # <-- FIXED
+        # --- MODIFIED ---
+        if ctx.obj and hasattr(ctx.obj, 'vector_manager'):
+            manager = ctx.obj.vector_manager
+        else:
+            click.secho("  > (Single Command Mode) Initializing VectorManager...", dim=True)
+            manager = VectorManager(get_config())
+
+        if not manager:
+            click.secho("Error: No active project. Please use '/project active <name>'.", fg="red")
+            return
+        # --- END MODIFIED ---
+
         success, message = manager.remove_from_corpus(identifier)
         if success:
             click.secho(f"Success: {message}", fg="green")
@@ -52,10 +77,22 @@ def remove(identifier):
 
 
 @corpus.command('list')
-def list_files():
+@click.pass_context
+def list_files(ctx):
     """Lists all files in the active project's corpus."""
     try:
-        manager = VectorManager(get_config())  # <-- FIXED
+        # --- MODIFIED ---
+        if ctx.obj and hasattr(ctx.obj, 'vector_manager'):
+            manager = ctx.obj.vector_manager
+        else:
+            click.secho("  > (Single Command Mode) Initializing VectorManager...", dim=True)
+            manager = VectorManager(get_config())
+
+        if not manager:
+            click.secho("Error: No active project. Please use '/project active <name>'.", fg="red")
+            return
+        # --- END MODIFIED ---
+
         corpus_items = manager.list_corpus()
         if not corpus_items:
             click.echo("The corpus is currently empty.")
@@ -72,12 +109,9 @@ def list_files():
         )
 
         for path_in_corpus, meta in sorted_items:
-            # The ID is the UUID-based name of the file stored in the corpus
             file_id = Path(path_in_corpus).stem
             doc_type = meta.get('doc_type', 'N/A')
             original_filename = Path(meta.get('original_path', 'Unknown')).name
-
-            # Get the chunk count for the current document
             chunk_count = manager.get_chunk_count(path_in_corpus)
 
             click.secho(f"{file_id:<38}", fg="cyan", nl=False)
@@ -95,10 +129,20 @@ def ingest(ctx):
     """Rebuilds the entire vector store from the project's corpus."""
     try:
         click.echo("This command will re-process the entire corpus, which can be time-consuming.")
-        # Add a confirmation prompt that defaults to 'No' for safety.
         click.confirm("Are you sure you want to proceed?", abort=True, default=False)
 
-        manager = VectorManager(get_config())  # <-- Correct
+        # --- MODIFIED ---
+        if ctx.obj and hasattr(ctx.obj, 'vector_manager'):
+            manager = ctx.obj.vector_manager
+        else:
+            click.secho("  > (Single Command Mode) Initializing VectorManager...", dim=True)
+            manager = VectorManager(get_config())
+
+        if not manager:
+            click.secho("Error: No active project. Please use '/project active <name>'.", fg="red")
+            return
+        # --- END MODIFIED ---
+
         manager.rebuild_vector_store()
     except click.exceptions.Abort:
         click.echo("Operation cancelled by user.")
@@ -110,21 +154,29 @@ def ingest(ctx):
 @click.pass_context
 def rebuild(ctx):
     """Alias for 'ingest'. Rebuilds the entire vector store."""
-    # This invokes the 'ingest' command, ensuring the logic is not duplicated.
     ctx.invoke(ingest)
 
 
 @corpus.command('summary')
 @click.argument('identifier')
-def summary(identifier):
+@click.pass_context
+def summary(ctx, identifier):
     """
     Displays the holistic summary for a specific file.
-
-    Identifier can be the file's original name or its corpus ID.
-    Example: /corpus summary my_file.txt
     """
     try:
-        manager = VectorManager(get_config())  # <-- FIXED
+        # --- MODIFIED ---
+        if ctx.obj and hasattr(ctx.obj, 'vector_manager'):
+            manager = ctx.obj.vector_manager
+        else:
+            click.secho("  > (Single Command Mode) Initializing VectorManager...", dim=True)
+            manager = VectorManager(get_config())
+
+        if not manager:
+            click.secho("Error: No active project. Please use '/project active <name>'.", fg="red")
+            return
+        # --- END MODIFIED ---
+
         success, content = manager.get_holistic_summary(identifier)
 
         if not success:

@@ -56,6 +56,13 @@ class ProjectManager:
 
         return project_name, project_path
 
+    def get_project_path_by_name(self, project_name):
+        """Helper to get a project's path without setting it as active."""
+        project_path = os.path.join(self.projects_dir, project_name)
+        if os.path.isdir(project_path):
+            return project_path
+        return None
+
     def remove_project(self, project_name):
         """Permanently deletes a project directory and its contents."""
         project_path = os.path.join(self.projects_dir, project_name)
@@ -64,7 +71,8 @@ class ProjectManager:
 
         active_project, _ = self.get_active_project()
         if active_project == project_name:
-            os.remove(self.active_project_file)
+            if os.path.exists(self.active_project_file):
+                os.remove(self.active_project_file)
 
         try:
             shutil.rmtree(project_path)

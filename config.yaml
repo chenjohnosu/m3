@@ -14,10 +14,9 @@ project_settings:
 # EMBEDDING MODEL SETTINGS
 # ==============================================================================
 embedding_settings:
-  provider: 'huggingface'
+  provider: 'ollama'
   # Change this line to your preferred model
   model_name: 'intfloat/multilingual-e5-large' # <--- YOUR PREFERRED MODEL HERE
-  cache_folder: '~/.cache/m3_models'
 
 # ==============================================================================
 # LLM PROVIDER DEFINITIONS
@@ -29,10 +28,17 @@ llm_providers:
     base_url: 'http://10.255.255.254:11434'
     #base_url: 'http://localhost:11434'
     models:
+      # --- NEW MODEL ROLE ---
+      # A model for very heavy, long-running tasks like Stage 0
+      stratify_model:
+        model_name: 'mistral'
+        request_timeout: 300.0  # 5-minute timeout
+
       # A powerful model for complex reasoning (e.g., llama3, mixtral)
       synthesis_model:
         model_name: 'mistral'
         request_timeout: 120.0
+
       # A fast model for routine tasks (e.g., mistral, llama3:8b)
       enrichment_model:
         model_name: 'mistral'
@@ -56,7 +62,11 @@ ingestion_config:
 
   # Assigns the LLMs defined above to the specific stages of the pipeline.
   cogarc_settings:
-    stage_0_model: 'synthesis_model'
+    # --- MODIFIED ---
+    # Assign the new, long-timeout model to Stage 0
+    stage_0_model: 'stratify_model'
+    # --- END MODIFIED ---
+
     stage_1_model: 'synthesis_model'
     stage_2_model: 'enrichment_model'
     stage_3_model: 'synthesis_model'
