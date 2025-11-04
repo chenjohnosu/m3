@@ -4,8 +4,9 @@ PIPELINES = {
     "cogarc": CognitiveArchitectPipeline,
 }
 
-def get_pipeline(pipeline_name, config):
+def get_pipeline(pipeline_name, config, llm_manager):
     pipeline_class = PIPELINES.get(pipeline_name)
     if not pipeline_class:
         raise ValueError(f"Unknown pipeline: '{pipeline_name}'.")
-    return pipeline_class(config)
+    # Pass the llm_manager to the constructor
+    return pipeline_class(config, llm_manager)

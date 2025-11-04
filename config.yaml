@@ -14,9 +14,10 @@ project_settings:
 # EMBEDDING MODEL SETTINGS
 # ==============================================================================
 embedding_settings:
-  provider: 'ollama'
+  provider: 'huggingface'
   # Change this line to your preferred model
-  model_name: 'intfloat-multilingual-e5-large' # <--- YOUR PREFERRED MODEL HERE
+  model_name: 'intfloat/multilingual-e5-large' # <--- YOUR PREFERRED MODEL HERE
+  cache_folder: '~/.cache/m3_models'
 
 # ==============================================================================
 # LLM PROVIDER DEFINITIONS
@@ -25,7 +26,8 @@ embedding_settings:
 llm_providers:
   ollama_client:
     provider: 'ollama'
-    base_url: 'http://localhost:11434'
+    base_url: 'http://10.255.255.254:11434'
+    #base_url: 'http://localhost:11434'
     models:
       # A powerful model for complex reasoning (e.g., llama3, mixtral)
       synthesis_model:

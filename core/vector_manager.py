@@ -11,24 +11,18 @@ import hashlib
 # LlamaIndex core components
 from llama_index.core import VectorStoreIndex, StorageContext
 from llama_index.core import Settings as LlamaSettings
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 import chromadb
 
 # Project-specific components
-from utils.file_reader import read_files  # <-- This should be read_files_from_paths
+from utils.file_reader import read_files
 from core.project_manager import ProjectManager
 from core.llm_manager import LLMManager
 from core.ingestion.pipeline_factory import get_pipeline
-from core.db_manager import get_embed_model, get_chroma_client  # <-- This is from your repo
+from core.db_manager import get_embed_model, get_chroma_client
 
 # E5 models expect cosine similarity
 CHROMA_METADATA = {"hnsw:space": "cosine"}
-
-
-# --- MODIFIED: Removed the hard-coded default list ---
-# METADATA_TO_HIDE_DEFAULT = ['holistic_summary', 'original_filename', 'file_path', 'original_text']
-# ----------------------------------------------------
 
 
 def get_file_hash(file_path):
@@ -65,16 +59,18 @@ class VectorManager:
         self.embed_model = get_embed_model(model_name)
         LlamaSettings.embed_model = self.embed_model
 
-        llm_manager = LLMManager(self.config)
-        LlamaSettings.llm = llm_manager.get_llm('enrichment_model')
+        # --- MODIFIED: Create and store the LLM manager ---
+        # This will print the "Instantiating LLM..." messages
+        self.llm_manager = LLMManager(self.config)
+        LlamaSettings.llm = self.llm_manager.get_llm('enrichment_model')
+        # --- END MODIFICATION ---
 
-        # --- NEW: Load the display hide list from config ---
+        # Load the display hide list from config
         analysis_config = self.config.get('analysis_settings', {})
         self.metadata_to_hide = analysis_config.get(
             'metadata_keys_to_hide_display',
             ['original_filename', 'file_path', 'original_text']  # Fallback default
         )
-        # -------------------------------------------------
 
         self.client = get_chroma_client(self.chroma_db_path)
 
@@ -88,7 +84,16 @@ class VectorManager:
 
         self.index = VectorStoreIndex.from_documents([], storage_context=self.storage_context)
 
-    # ... (rest of file) ...
+        # --- NEW: Initialize the ingestion pipeline once ---
+        try:
+            # This will print "Initializing Cognitive Architect Pipeline..."
+            # It receives the already-loaded LLM Manager
+            self.ingestion_pipeline = get_pipeline('cogarc', self.config, self.llm_manager)
+        except Exception as e:
+            click.secho(f"Warning: Could not initialize ingestion pipeline: {e}", fg="yellow", err=True)
+            self.ingestion_pipeline = None
+        # --- END NEW SECTION ---
+
     def _load_metadata(self):
         if not os.path.exists(self.metadata_path):
             return {}
@@ -107,24 +112,29 @@ class VectorManager:
         return None, None
 
     def _process_and_ingest_file(self, file_path_in_corpus, doc_type):
-        """Processes a single file using the Cognitive Architect Pipeline."""
+        """Processes a single file using the pre-loaded Cognitive Architect Pipeline."""
         click.echo(f"\n--- Processing '{Path(file_path_in_corpus).name}' (Type: {doc_type}) ---")
 
-        # Use the correct file reader function from your repo
+        # Use the correct file reader function
         documents = read_files([file_path_in_corpus])
         if not documents:
             click.secho("  > Failed to read document.", fg="yellow")
             return
 
-        # --- NEW: Add file_path to metadata before pipeline ---
-        # This is crucial for the pipeline to know the source
+        # Add file_path to metadata before pipeline
         for doc in documents:
             doc.metadata['file_path'] = file_path_in_corpus
             doc.metadata['original_filename'] = Path(file_path_in_corpus).name
-        # ----------------------------------------------------
 
-        pipeline = get_pipeline('cogarc', self.config)
-        processed_data = pipeline.run(documents, doc_type)
+        # --- MODIFIED: Use the cached pipeline ---
+        if not self.ingestion_pipeline:
+            click.secho("  > Error: Ingestion pipeline is not available. Aborting file processing.", fg="red")
+            return
+
+        # No new LLMs will be loaded here.
+        processed_data = self.ingestion_pipeline.run(documents, doc_type)
+        # --- END MODIFICATION ---
+
         nodes = processed_data.get('primary_nodes', [])
 
         if nodes:
@@ -136,6 +146,11 @@ class VectorManager:
         click.echo("--- Finished Processing ---")
 
     def add_to_corpus(self, paths, doc_type):
+        """
+        Adds one or more files to the corpus.
+        The VectorManager (and its pipeline) is already initialized,
+        so this loop just processes files.
+        """
         metadata = self._load_metadata()
         for path_str in paths:
             path = Path(path_str)
@@ -158,6 +173,7 @@ class VectorManager:
                 }
                 click.echo(f"  > Added '{file_path.name}' to corpus manifest.")
                 self._save_metadata(metadata)
+                # This will use the pre-loaded pipeline
                 self._process_and_ingest_file(str(destination_path), doc_type)
 
     def remove_from_corpus(self, identifier):
@@ -276,7 +292,6 @@ class VectorManager:
 
             all_keys = list(doc_meta.keys())
 
-            # --- MODIFIED: Use the config list ---
             # Use the list loaded from config.yaml in __init__
             keys_to_hide = self.metadata_to_hide[:]  # Make a copy
 
@@ -288,7 +303,6 @@ class VectorManager:
                 # If --summary is passed, make sure we DON'T hide it
                 if 'holistic_summary' in keys_to_hide:
                     keys_to_hide.remove('holistic_summary')
-            # --- END MODIFICATION ---
 
             keys_to_print = [k for k in all_keys if k not in keys_to_hide]
             should_print_metadata = (pretty or include_metadata) and keys_to_print
@@ -350,7 +364,7 @@ class VectorManager:
         if not summary:
             return False, f"No holistic summary found for '{original_filename}'."
 
-        return True, {"original_name": original_filename, "summary": summary}
+        return True, {"original_name": original_name, "summary": summary}
 
     def query_vector_store(self, query_text):
         click.echo(f"Querying project '{self.project_name}' for: '{query_text}'")
