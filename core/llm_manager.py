@@ -1,5 +1,4 @@
 from llama_index.llms.ollama import Ollama
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from utils.config import get_config
 import click
 
@@ -83,31 +82,3 @@ class LLMManager:
 
         raise ValueError(
             f"LLM model key '{model_key_to_use}' (for role '{model_key}') not found in llm_providers in config.yaml")
-
-
-# -----------------------------------------------------------------
-# --- ADD THIS MISSING FUNCTION ---
-# -----------------------------------------------------------------
-
-def get_embedding_model(config=None):
-    """
-    Creates and returns a LlamaIndex embedding model instance based on the config.
-    This function is required by VectorManager.
-    """
-    if not config:
-        config = get_config()
-
-    embed_config = config.get('embedding_settings', {})
-    model_name = embed_config.get('model_name')
-
-    if not model_name:
-        raise ValueError("Embedding model name not found in config.yaml under 'embedding_settings'.")
-
-    click.echo(f"  > Loading embedding model: {model_name}")
-
-    # This uses the default cache folder (~/.cache/huggingface/hub)
-    # You can add 'cache_folder' to your config.yaml 'embedding_settings' if needed
-    return HuggingFaceEmbedding(
-        model_name=model_name,
-        cache_folder=embed_config.get('cache_folder', None)
-    )
