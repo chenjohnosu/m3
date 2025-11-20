@@ -1,14 +1,11 @@
-# plugins/clustering.py
-
 import click
 import json
 import re
 from plugins.base_plugin import BaseAnalyzerPlugin
+from core.prompt_manager import PromptManager
 from collections import defaultdict
 from llama_index.core.llms import ChatMessage
 
-# (Imports for AnalyzeManager, sklearn, and AXIAL_CODING_PROMPT remain the same)
-# ...
 # Forward-declare AnalyzeManager
 if "AnalyzeManager" not in globals():
     from typing import TypeVar
@@ -26,23 +23,6 @@ except ImportError:
     SKLEARN_AVAILABLE = False
 # -----------------------------
 
-# --- NEW: System prompt for Axial Coding ---
-AXIAL_CODING_PROMPT = """
-You are an expert qualitative data analyst. You will be given a list of "open codes" or "initial themes" identified in a set of related data chunks.
-Your task is to perform "axial coding" by synthesizing these initial themes into a single, more abstract "core theme" (3-7 words) that represents the central concept of the cluster.
-The output must be a single, valid JSON object with one key: "axial_theme".
-
-Example Input:
-["Difficulty finding information", "Website navigation issues", "Confusing help articles", "Unclear instructions"]
-
-Example Output:
-{"axial_theme": "User frustration with information access"}
-"""
-
-
-# -----------------------------------------
-
-
 class ClusteringPlugin(BaseAnalyzerPlugin):
     """
     Performs Hierarchical clustering and Axial Coding on document chunks.
@@ -58,7 +38,7 @@ class ClusteringPlugin(BaseAnalyzerPlugin):
 
         # --- 1. Check for Dependencies ---
         if not SKLEARN_AVAILABLE:
-            click.secho("🔥 Error: 'scikit-learn' is required for the clustering plugin.", fg="red")
+            click.secho("櫨 Error: 'scikit-learn' is required for the clustering plugin.", fg="red")
             click.echo("  > Please install it by running: pip install scikit-learn")
             return
 
@@ -82,7 +62,7 @@ class ClusteringPlugin(BaseAnalyzerPlugin):
             if not llm:
                 raise ValueError("LLM is not available via AnalyzeManager.")
         except Exception as e:
-            click.secho(f"🔥 Error: Could not load LLM for theme synthesis: {e}", fg="red")
+            click.secho(f"櫨 Error: Could not load LLM for theme synthesis: {e}", fg="red")
             return
 
         # --- 4. Get All Data from Vector Store ---
@@ -91,7 +71,7 @@ class ClusteringPlugin(BaseAnalyzerPlugin):
                 include=["embeddings", "metadatas", "documents"]
             )
         except Exception as e:
-            click.secho(f"🔥 Error: Could not retrieve data from vector store: {e}", fg="red")
+            click.secho(f"櫨 Error: Could not retrieve data from vector store: {e}", fg="red")
             return
 
         ids = all_data.get('ids')
@@ -112,7 +92,7 @@ class ClusteringPlugin(BaseAnalyzerPlugin):
             clusterer = AgglomerativeClustering(n_clusters=k)
             labels = clusterer.fit_predict(embeddings_np)
         except Exception as e:
-            click.secho(f"🔥 Error during clustering: {e}", fg="red")
+            click.secho(f"櫨 Error during clustering: {e}", fg="red")
             return
 
         # --- 6. Group Chunks by Cluster ---
@@ -132,6 +112,8 @@ class ClusteringPlugin(BaseAnalyzerPlugin):
             if not chunks_in_cluster:
                 continue
 
+            axial_prompt = PromptManager().get('analysis_clustering_axial')
+
             cluster_label_str = f"cluster_{cluster_id + 1}"
             click.secho(f"\n--- Cluster {cluster_id + 1} ({len(chunks_in_cluster)} Chunks) ---", bold=True)
 
@@ -149,7 +131,7 @@ class ClusteringPlugin(BaseAnalyzerPlugin):
                 if cluster_themes:
                     unique_themes = sorted(list(set(cluster_themes)))
                     messages = [
-                        ChatMessage(role="system", content=AXIAL_CODING_PROMPT),
+                        ChatMessage(role="system", content=axial_prompt),
                         ChatMessage(role="user", content=json.dumps(unique_themes))
                     ]
                     click.echo(f"  > Synthesizing {len(unique_themes)} unique themes for Axial Code...")
@@ -193,11 +175,10 @@ class ClusteringPlugin(BaseAnalyzerPlugin):
                                 fg="green")
 
                 except Exception as e:
-                    click.secho(f"  > 🔥 Error updating metadata in vector store: {e}", fg="red")
+                    click.secho(f"  > 櫨 Error updating metadata in vector store: {e}", fg="red")
             # -----------------------------------------------------------------
 
             # --- 10. Find Representative Terms (for display) ---
-            # (This logic remains the same as before)
             try:
                 cluster_texts = [c['document'] for c in chunks_in_cluster]
                 vectorizer = TfidfVectorizer(max_features=5, stop_words='english', ngram_range=(1, 2))
@@ -209,7 +190,6 @@ class ClusteringPlugin(BaseAnalyzerPlugin):
                 click.secho(f"  > Could not determine representative terms: {e}", fg="yellow")
 
             # --- 11. Print Chunk Samples (for display) ---
-            # (This logic remains the same as before)
             click.echo("  > Sample Chunks:")
             for chunk in chunks_in_cluster[:3]:
                 meta = chunk['metadata']

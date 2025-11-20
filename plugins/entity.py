@@ -1,4 +1,5 @@
 from plugins.llm_base_plugin import LLMBaseAnalyzerPlugin
+from core.prompt_manager import PromptManager
 
 # Forward-declare AnalyzeManager
 if "AnalyzeManager" not in globals():
@@ -18,18 +19,6 @@ class EntityPlugin(LLMBaseAnalyzerPlugin):
         Returns the system prompt for entity extraction.
         """
         if not options:
-            return (
-                "You are an entity extraction assistant. The user failed to provide "
-                "entity types to extract. Please tell them to use the --options flag.\n\n"
-                "Example: /a run entity \"safety concerns\" --options='People,Locations,Equipment'"
-            )
+            return PromptManager().get('plugin_entity_error').format(query=query)
 
-        return (
-            "You are an expert entity extraction assistant. "
-            "Read the provided context chunks and extract all entities of the "
-            f"following types: {options}\n\n"
-            "The analysis should focus on information relevant to the user's query: "
-            f"\"{query}\"\n\n"
-            "List the extracted entities, grouped by type. Only list entities "
-            "explicitly found in the text."
-        )
+        return PromptManager().get('plugin_entity').format(query=query, options=options)

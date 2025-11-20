@@ -1,4 +1,5 @@
 from plugins.llm_base_plugin import LLMBaseAnalyzerPlugin
+from core.prompt_manager import PromptManager
 
 # Forward-declare AnalyzeManager
 if "AnalyzeManager" not in globals():
@@ -17,10 +18,4 @@ class SummarizePlugin(LLMBaseAnalyzerPlugin):
         """
         Returns the system prompt for summarization.
         """
-        return (
-            "You are an expert summarization assistant. "
-            "Based *only* on the context provided by the user, write a concise, "
-            "multi-paragraph summary that directly answers the user's query.\n\n"
-            "Do not use any information other than the context provided.\n\n"
-            f"USER QUERY: \"{query}\""
-        )
+        return PromptManager().get('plugin_summarize').format(query=query)
