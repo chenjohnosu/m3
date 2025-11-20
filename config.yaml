@@ -25,8 +25,8 @@ embedding_settings:
 llm_providers:
   ollama_client:
     provider: 'ollama'
-    base_url: 'http://10.255.255.254:11434'
-    #base_url: 'http://localhost:11434'
+    #base_url: 'http://10.255.255.254:11434'
+    base_url: 'http://localhost:11435'
     models:
       # --- NEW MODEL ROLE ---
       # A model for very heavy, long-running tasks like Stage 0
