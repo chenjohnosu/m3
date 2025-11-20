@@ -7,19 +7,6 @@ if "AnalyzeManager" not in globals():
 
     AnalyzeManager = TypeVar("AnalyzeManager")
 
-# --- Anomaly Dependencies ---
-# Attempt to import scikit-learn.
-try:
-    import numpy as np
-    from sklearn.ensemble import IsolationForest
-
-    SKLEARN_AVAILABLE = True
-except ImportError:
-    SKLEARN_AVAILABLE = False
-
-
-# -----------------------------
-
 
 class AnomalyPlugin(BaseAnalyzerPlugin):
     """
@@ -36,9 +23,14 @@ class AnomalyPlugin(BaseAnalyzerPlugin):
         displays the Top-K chunks with the lowest (most anomalous) scores.
         """
 
-        # --- 1. Check for Dependencies ---
-        if not SKLEARN_AVAILABLE:
+        # --- 1. Lazy Import Dependencies ---
+        click.echo("  > Loading anomaly detection libraries...")
+        try:
+            import numpy as np
+            from sklearn.ensemble import IsolationForest
+        except ImportError as e:
             click.secho("🔥 Error: 'scikit-learn' is required for the anomaly plugin.", fg="red")
+            click.echo(f"  > Details: {e}")
             click.echo("  > Please install it by running: pip install scikit-learn")
             return
 

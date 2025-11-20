@@ -11,21 +11,6 @@ if "AnalyzeManager" not in globals():
 
     AnalyzeManager = TypeVar("AnalyzeManager")
 
-# --- Visualization Dependencies ---
-try:
-    import numpy as np
-    import pandas as pd
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    from sklearn.manifold import TSNE
-
-    VIZ_AVAILABLE = True
-except ImportError:
-    VIZ_AVAILABLE = False
-
-
-# ---------------------------------
-
 
 class VisualizePlugin(BaseAnalyzerPlugin):
     """
@@ -39,14 +24,21 @@ class VisualizePlugin(BaseAnalyzerPlugin):
         Runs the t-SNE dimensionality reduction and saves a plot.
         """
 
-        # --- 1. Check for Dependencies ---
-        if not VIZ_AVAILABLE:
+        # --- 1. Lazy Import Dependencies ---
+        click.echo("  > Loading visualization libraries (this may take a moment)...")
+        try:
+            import numpy as np
+            import pandas as pd
+            import matplotlib.pyplot as plt
+            import seaborn as sns
+            from sklearn.manifold import TSNE
+        except ImportError as e:
             click.secho("🔥 Error: Missing dependencies for the visualize plugin.", fg="red")
-            click.echo("  > Please run: pip install pandas matplotlib seaborn")
+            click.echo(f"  > Details: {e}")
+            click.echo("  > Please run: pip install pandas matplotlib seaborn scikit-learn")
             return
 
         click.secho(f"==> Running: {self.key} Plugin (t-SNE Knowledge Map)", fg="cyan")
-        click.echo("  > This may take a few minutes for large datasets...")
 
         # --- 2. Get All Data from Vector Store ---
         try:

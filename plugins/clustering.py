@@ -1,27 +1,29 @@
+# plugins/clustering.py
+
 import click
 import json
 import re
 from plugins.base_plugin import BaseAnalyzerPlugin
-from core.prompt_manager import PromptManager
 from collections import defaultdict
 from llama_index.core.llms import ChatMessage
 
 # Forward-declare AnalyzeManager
 if "AnalyzeManager" not in globals():
     from typing import TypeVar
-
     AnalyzeManager = TypeVar("AnalyzeManager")
 
-# --- Clustering Dependencies ---
-try:
-    import numpy as np
-    from sklearn.cluster import AgglomerativeClustering
-    from sklearn.feature_extraction.text import TfidfVectorizer
+# System prompt for Axial Coding
+AXIAL_CODING_PROMPT = """
+You are an expert qualitative data analyst. You will be given a list of "open codes" or "initial themes" identified in a set of related data chunks.
+Your task is to perform "axial coding" by synthesizing these initial themes into a single, more abstract "core theme" (3-7 words) that represents the central concept of the cluster.
+The output must be a single, valid JSON object with one key: "axial_theme".
 
-    SKLEARN_AVAILABLE = True
-except ImportError:
-    SKLEARN_AVAILABLE = False
-# -----------------------------
+Example Input:
+["Difficulty finding information", "Website navigation issues", "Confusing help articles", "Unclear instructions"]
+
+Example Output:
+{"axial_theme": "User frustration with information access"}
+"""
 
 class ClusteringPlugin(BaseAnalyzerPlugin):
     """
@@ -36,9 +38,15 @@ class ClusteringPlugin(BaseAnalyzerPlugin):
         Checks for '--save' flag in kwargs to persist metadata.
         """
 
-        # --- 1. Check for Dependencies ---
-        if not SKLEARN_AVAILABLE:
+        # --- 1. Lazy Import Dependencies ---
+        click.echo("  > Loading clustering libraries...")
+        try:
+            import numpy as np
+            from sklearn.cluster import AgglomerativeClustering
+            from sklearn.feature_extraction.text import TfidfVectorizer
+        except ImportError as e:
             click.secho("櫨 Error: 'scikit-learn' is required for the clustering plugin.", fg="red")
+            click.echo(f"  > Details: {e}")
             click.echo("  > Please install it by running: pip install scikit-learn")
             return
 
@@ -112,8 +120,6 @@ class ClusteringPlugin(BaseAnalyzerPlugin):
             if not chunks_in_cluster:
                 continue
 
-            axial_prompt = PromptManager().get('analysis_clustering_axial')
-
             cluster_label_str = f"cluster_{cluster_id + 1}"
             click.secho(f"\n--- Cluster {cluster_id + 1} ({len(chunks_in_cluster)} Chunks) ---", bold=True)
 
@@ -131,7 +137,7 @@ class ClusteringPlugin(BaseAnalyzerPlugin):
                 if cluster_themes:
                     unique_themes = sorted(list(set(cluster_themes)))
                     messages = [
-                        ChatMessage(role="system", content=axial_prompt),
+                        ChatMessage(role="system", content=AXIAL_CODING_PROMPT),
                         ChatMessage(role="user", content=json.dumps(unique_themes))
                     ]
                     click.echo(f"  > Synthesizing {len(unique_themes)} unique themes for Axial Code...")
