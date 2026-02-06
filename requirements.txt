@@ -19,7 +19,6 @@ seaborn
 
 # Document Parsing
 unstructured[local-inference]
-PyPDF2
 python-docx
 docx2txt
 
