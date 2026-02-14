@@ -17,6 +17,8 @@ embedding_settings:
   provider: 'ollama'
   # Change this line to your preferred model
   model_name: 'intfloat/multilingual-e5-large' # <--- YOUR PREFERRED MODEL HERE
+  # Device for embedding model: auto (detect GPU), cpu, mps (Apple Silicon), cuda (NVIDIA)
+  # device: 'auto'
 
 # ==============================================================================
 # LLM PROVIDER DEFINITIONS

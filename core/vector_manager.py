@@ -22,6 +22,7 @@ from core.llm_manager import LLMManager
 from core.ingestion.pipeline_factory import get_pipeline
 from core.db_manager import get_embed_model, get_chroma_client
 from utils.config import get_config
+from utils.device import detect_device
 
 
 # E5 models expect cosine similarity
@@ -73,7 +74,9 @@ class VectorManager:
         if not model_name:
             raise ValueError("Embedding model name not found in config.yaml.")
 
-        self.embed_model = get_embed_model(model_name)
+        config_device = embed_config.get('device')
+        device = detect_device(config_override=config_device if config_device != 'auto' else None)
+        self.embed_model = get_embed_model(model_name, device=device)
         LlamaSettings.embed_model = self.embed_model
 
         # Use the passed-in LLMManager

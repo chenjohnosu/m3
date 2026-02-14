@@ -17,6 +17,7 @@ from llama_index.core.schema import NodeWithScore, TextNode
 
 # Import the shared instance managers
 from core.db_manager import get_embed_model, get_chroma_client
+from utils.device import detect_device
 
 # E5 models expect cosine similarity
 CHROMA_METADATA = {"hnsw:space": "cosine"}
@@ -65,7 +66,9 @@ class AnalyzeManager:
         if not model_name:
             raise ValueError("Embedding model name not found in config.yaml.")
 
-        self.embed_model = get_embed_model(model_name)
+        config_device = embed_config.get('device')
+        device = detect_device(config_override=config_device if config_device != 'auto' else None)
+        self.embed_model = get_embed_model(model_name, device=device)
         LlamaSettings.embed_model = self.embed_model
 
         self.chroma_db_path = os.path.join(self.project_path, "chroma_db")

@@ -17,6 +17,7 @@ import unittest
 import io
 import argparse
 import time
+import platform
 
 # Ensure the project root is on sys.path so imports work
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -31,6 +32,7 @@ os.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
 # Each entry maps a display name to the test module path
 TEST_MODULES = [
     ("utils/config",             "tests.test_utils_config"),
+    ("utils/device",             "tests.test_device"),
     ("utils/file_handler",       "tests.test_utils_file_handler"),
     ("utils/file_reader",        "tests.test_utils_file_reader"),
     ("core/project_manager",     "tests.test_project_manager"),
@@ -123,6 +125,23 @@ def main():
     print(f"{BOLD}{'=' * 64}")
     print(f"  m3 Diagnostics  —  Validate all m3 modules")
     print(f"{'=' * 64}{RESET}")
+
+    # Platform info
+    print(f"  {DIM}Platform: {platform.system()} {platform.machine()}{RESET}")
+    try:
+        from utils.device import detect_device, get_device_info, DEVICE_LABELS
+        # Suppress click.echo output during detection
+        old_stderr = sys.stderr
+        sys.stderr = io.StringIO()
+        device = detect_device()
+        sys.stderr = old_stderr
+        label = DEVICE_LABELS.get(device, device)
+        info = get_device_info()
+        torch_ver = info.get('torch_version', 'N/A')
+        print(f"  {DIM}Compute:  {label}  (torch {torch_ver}){RESET}")
+    except Exception:
+        print(f"  {DIM}Compute:  unknown (device detection unavailable){RESET}")
+
     print()
 
     # Filter modules if requested

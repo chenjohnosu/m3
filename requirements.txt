@@ -23,4 +23,7 @@ python-docx
 docx2txt
 
 # GPU acceleration
+# macOS: 'pip install torch' includes MPS (Apple Silicon) support by default.
+# Linux (NVIDIA): install the CUDA variant instead:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
 torch

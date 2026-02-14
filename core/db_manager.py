@@ -11,7 +11,7 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 _cached_embed_model = None
 _cached_chroma_client = None
 
-def get_embed_model(model_name):
+def get_embed_model(model_name, device=None):
     """
     Returns a cached, singleton instance of the embedding model
     and sets it on LlamaSettings.embed_model.
@@ -19,10 +19,12 @@ def get_embed_model(model_name):
     global _cached_embed_model
     if _cached_embed_model is None:
         # We use err=True to ensure this logs outside of a --quiet flag
-        click.echo(f"INFO: Loading embedding model '{model_name}'...", err=True)
+        click.echo(f"INFO: Loading embedding model '{model_name}' on device '{device or 'default'}'...", err=True)
         # E5 models should use normalize=True for cosine similarity
-        _cached_embed_model = HuggingFaceEmbedding(model_name=model_name, normalize=True)
-        # LlamaSettings.embed_model = _cached_embed_model  <-- REMOVE THIS LINE
+        kwargs = {'model_name': model_name, 'normalize': True}
+        if device:
+            kwargs['device'] = device
+        _cached_embed_model = HuggingFaceEmbedding(**kwargs)
     return _cached_embed_model
 
 def get_chroma_client(db_path):
