@@ -27,6 +27,7 @@ from utils.device import detect_device
 
 # E5 models expect cosine similarity
 CHROMA_METADATA = {"hnsw:space": "cosine"}
+DEFAULT_COLLECTION = "m3_collection"
 
 
 def get_file_hash(file_path):
@@ -91,7 +92,7 @@ class VectorManager:
         self.client = get_chroma_client(self.chroma_db_path)
 
         self.collection = self.client.get_or_create_collection(
-            name="m3_collection",
+            name=DEFAULT_COLLECTION,
             metadata=CHROMA_METADATA
         )
 
@@ -205,7 +206,7 @@ class VectorManager:
         self.client.reset()
         click.echo("  > Re-initializing collection and index...")
         self.collection = self.client.get_or_create_collection(
-            name="m3_collection",
+            name=DEFAULT_COLLECTION,
             metadata=CHROMA_METADATA
         )
         self.vector_store = ChromaVectorStore(chroma_collection=self.collection)
@@ -366,3 +367,36 @@ class VectorManager:
         query_engine = self.index.as_query_engine()
         response = query_engine.query(query_text)
         click.echo(response)
+
+    # ------------------------------------------------------------------
+    # Multi-collection API (for programmatic/facade use)
+    # ------------------------------------------------------------------
+
+    def store(self, documents, metadatas, ids, collection_name=DEFAULT_COLLECTION):
+        """
+        Store documents directly into a named collection, bypassing the pipeline.
+        documents: list of strings, metadatas: list of dicts, ids: list of strings.
+        """
+        collection = self.client.get_or_create_collection(
+            name=collection_name, metadata=CHROMA_METADATA
+        )
+        collection.upsert(documents=documents, metadatas=metadatas, ids=ids)
+
+    def query(self, query_text, n_results=5, where=None, collection_name=DEFAULT_COLLECTION):
+        """
+        Semantic query against a named collection. Returns raw Chroma response dict.
+        """
+        collection = self.client.get_or_create_collection(
+            name=collection_name, metadata=CHROMA_METADATA
+        )
+        kwargs = {"query_texts": [query_text], "n_results": n_results}
+        if where:
+            kwargs["where"] = where
+        return collection.query(**kwargs)
+
+    def delete_by_ids(self, ids, collection_name=DEFAULT_COLLECTION):
+        """Delete documents by ID from a named collection."""
+        collection = self.client.get_or_create_collection(
+            name=collection_name, metadata=CHROMA_METADATA
+        )
+        collection.delete(ids=ids)

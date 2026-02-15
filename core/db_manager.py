@@ -43,3 +43,24 @@ def get_chroma_client(db_path):
             settings=ChromaSettings(allow_reset=True)
         )
     return _cached_chroma_client
+
+
+def get_or_create_collection(client, collection_name="m3_collection", metadata=None):
+    """
+    Get or create a named Chroma collection.
+    Default collection name preserves existing behavior.
+    """
+    kwargs = {"name": collection_name}
+    if metadata:
+        kwargs["metadata"] = metadata
+    return client.get_or_create_collection(**kwargs)
+
+
+def list_collections(client):
+    """Return names of all collections in the Chroma DB."""
+    return [c.name for c in client.list_collections()]
+
+
+def delete_collection(client, collection_name):
+    """Delete a named collection. Raises if it does not exist."""
+    client.delete_collection(name=collection_name)

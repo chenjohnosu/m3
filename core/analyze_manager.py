@@ -21,6 +21,7 @@ from utils.device import detect_device
 
 # E5 models expect cosine similarity
 CHROMA_METADATA = {"hnsw:space": "cosine"}
+DEFAULT_COLLECTION = "m3_collection"
 
 
 class AnalyzeManager:
@@ -81,7 +82,7 @@ class AnalyzeManager:
         self.client = get_chroma_client(self.chroma_db_path)
 
         self.collection = self.client.get_or_create_collection(
-            name="m3_collection",
+            name=DEFAULT_COLLECTION,
             metadata=CHROMA_METADATA
         )
         # --- END FIX ---

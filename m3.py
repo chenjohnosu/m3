@@ -167,6 +167,30 @@ def batch_mode(filename):
                         click.echo(f"An unexpected error occurred while executing '{command}': {e}", err=True)
 
 
+@cli.command('batch-ingest')
+@click.option('--project', 'project_name', required=True, help='Project name to ingest into.')
+@click.option('--corpus', 'corpus_path', required=True, type=click.Path(exists=True), help='Path to corpus directory or file.')
+@click.option('--collection', default="m3_collection", help='Target collection name.')
+@click.option('--doc-type', default="document", help='Document type (e.g., document, interview).')
+def batch_ingest(project_name, corpus_path, collection, doc_type):
+    """Non-interactive pipeline run. Outputs JSON summary to stdout."""
+    import json
+    from facade import M3System
+
+    try:
+        with M3System(project_name=project_name) as m3:
+            result = m3.ingest(
+                corpus_path=corpus_path,
+                collection_name=collection,
+                doc_type=doc_type,
+                batch_mode=True,
+            )
+            print(json.dumps(result, indent=2))
+    except Exception as e:
+        print(json.dumps({"error": str(e)}), file=sys.stderr)
+        sys.exit(1)
+
+
 # Add the command groups to the main CLI tool
 cli.add_command(project)
 cli.add_command(corpus)

@@ -45,6 +45,8 @@ TEST_MODULES = [
     ("core/session_manager",     "tests.test_session_manager"),
     ("cli/commands",             "tests.test_cli_commands"),
     ("plugins",                  "tests.test_plugins"),
+    ("pipeline_registration",    "tests.test_pipeline_registration"),
+    ("facade",                   "tests.test_facade"),
 ]
 
 
@@ -245,13 +247,13 @@ def main():
     print()
 
     if broken_count == 0 and skip_count == 0:
-        print(f"  {GREEN}{BOLD}✓ All modules passed.{RESET}")
+        print(f"  {GREEN}{BOLD}[PASS] All modules passed.{RESET}")
     elif broken_count == 0:
-        print(f"  {GREEN}{BOLD}✓ All runnable modules passed.{RESET}")
+        print(f"  {GREEN}{BOLD}[PASS] All runnable modules passed.{RESET}")
         skipped_names = [r['name'] for r in results if r['status'] == 'Skipped']
-        print(f"  {YELLOW}⊘ Skipped (missing deps): {', '.join(skipped_names)}{RESET}")
+        print(f"  {YELLOW}[SKIP] Skipped (missing deps): {', '.join(skipped_names)}{RESET}")
     else:
-        print(f"  {RED}{BOLD}✗ Some modules are broken!{RESET}")
+        print(f"  {RED}{BOLD}[FAIL] Some modules are broken!{RESET}")
         broken_names = [r['name'] for r in results if r['status'] == 'BROKEN']
         print(f"  {RED}  Broken: {', '.join(broken_names)}{RESET}")
         if skip_count > 0:
