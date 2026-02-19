@@ -155,7 +155,8 @@ class TestCorpusCommandsStructure(unittest.TestCase):
 
     def test_corpus_group_has_subcommands(self):
         commands = corpus_group.list_commands(None)
-        expected = ['add', 'remove', 'list', 'ingest', 'rebuild', 'summary']
+        expected = ['add', 'remove', 'list', 'ingest', 'rebuild', 'summary',
+                    'provenance', 'reconstitute', 'find-source']
         for cmd in expected:
             self.assertIn(cmd, commands, f"Missing corpus subcommand: {cmd}")
 

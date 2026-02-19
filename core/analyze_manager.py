@@ -221,7 +221,12 @@ class AnalyzeManager:
 
             click.echo("  ", nl=False)
             click.secho(f"Source: ", nl=False)
-            click.secho(f"{metadata.get('original_filename', 'Unknown')}", fg="green")
+            source_label = metadata.get('original_filename', 'Unknown')
+            chunk_idx = metadata.get('chunk_index')
+            chunk_total = metadata.get('chunk_count')
+            if chunk_idx is not None and chunk_total:
+                source_label += f"  (chunk {chunk_idx + 1}/{chunk_total})"
+            click.secho(source_label, fg="green")
 
             all_keys = list(metadata.keys())
             keys_to_hide = ['original_filename', 'file_path', 'original_text']

@@ -67,8 +67,10 @@ class VectorManager:
         self.corpus_path = os.path.join(self.project_path, "corpus")
         self.metadata_path = os.path.join(self.project_path, 'corpus_metadata.json')
         self.chroma_db_path = os.path.join(self.project_path, "chroma_db")
+        self.text_cache_path = os.path.join(self.project_path, "text_cache")
 
         os.makedirs(self.corpus_path, exist_ok=True)
+        os.makedirs(self.text_cache_path, exist_ok=True)
 
         embed_config = self.config.get('embedding_settings', {})
         model_name = embed_config.get('model_name')
@@ -101,7 +103,22 @@ class VectorManager:
 
         self.index = VectorStoreIndex.from_documents([], storage_context=self.storage_context)
 
-    # ... (rest of file) ...
+    # ── Text Cache Helpers ─────────────────────────────────────────────────
+
+    def _write_text_cache(self, file_id: str, text: str) -> str:
+        """Write extracted plain text to text_cache/<file_id>.txt; returns absolute path."""
+        cache_file = os.path.join(self.text_cache_path, f"{file_id}.txt")
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            f.write(text)
+        return cache_file
+
+    def _delete_text_cache(self, cache_path):
+        """Silently remove a text cache file if it exists."""
+        if cache_path:
+            Path(cache_path).unlink(missing_ok=True)
+
+    # ── Metadata Helpers ───────────────────────────────────────────────────
+
     def _load_metadata(self):
         if not os.path.exists(self.metadata_path):
             return {}
@@ -119,34 +136,54 @@ class VectorManager:
                 return path, meta
         return None, None
 
-    def _process_and_ingest_file(self, file_path_in_corpus, doc_type):
-        """Processes a single file using the Cognitive Architect Pipeline."""
+    # ── Find any entry matching by original_path ───────────────────────────
+
+    def _find_by_original_path(self, source_path_str: str, metadata: dict):
+        """Return (corpus_key, meta) for the first entry whose original_path matches source_path_str."""
+        for corpus_key, meta in metadata.items():
+            if meta.get('original_path') == source_path_str:
+                return corpus_key, meta
+        return None, None
+
+    # ── Core Ingestion ─────────────────────────────────────────────────────
+
+    def _process_and_ingest_file(self, file_path_in_corpus, doc_type, documents=None):
+        """Processes a single file using the Cognitive Architect Pipeline.
+
+        If *documents* is provided (already loaded), skip read_files().
+        Tags each node with chunk_index and chunk_count.
+        Returns the list of nodes so callers can record chunk_count.
+        """
         click.echo(f"\n--- Processing '{Path(file_path_in_corpus).name}' (Type: {doc_type}) ---")
 
-        documents = read_files([file_path_in_corpus])
-        if not documents:
-            click.secho("  > Failed to read document.", fg="yellow")
-            return
+        if documents is None:
+            documents = read_files([file_path_in_corpus])
+            if not documents:
+                click.secho("  > Failed to read document.", fg="yellow")
+                return []
 
         for doc in documents:
             doc.metadata['file_path'] = file_path_in_corpus
             doc.metadata['original_filename'] = Path(file_path_in_corpus).name
 
-        # --- THIS IS THE FIX ---
-        # We must pass the session's llm_manager to the pipeline
         pipeline = get_pipeline('cogarc', self.config, self.llm_manager)
-        # --- END FIX ---
 
         processed_data = pipeline.run(documents, doc_type)
         nodes = processed_data.get('primary_nodes', [])
 
+        total = len(nodes)
+        for i, node in enumerate(nodes):
+            node.metadata['chunk_index'] = i
+            node.metadata['chunk_count'] = total
+
         if nodes:
             self.index.insert_nodes(nodes)
-            click.echo(f"  > Stored {len(nodes)} chunks in the vector store.")
+            click.echo(f"  > Stored {total} chunks in the vector store.")
         else:
             click.secho("  > No chunks were generated from the document.", fg="yellow")
 
         click.echo("--- Finished Processing ---")
+        return nodes
 
     def add_to_corpus(self, paths, doc_type):
         metadata = self._load_metadata()
@@ -159,19 +196,90 @@ class VectorManager:
             for file_path in files_to_process:
                 if not file_path.is_file():
                     continue
+
                 file_hash = get_file_hash(file_path)
+                source_path_str = str(file_path)
+
+                # ── Duplicate / replace detection ──────────────────────────
+                existing_key, existing_meta = self._find_by_original_path(source_path_str, metadata)
+                inherited_history = []
+
+                if existing_key:
+                    if existing_meta.get('hash') == file_hash:
+                        click.secho(
+                            f"  > Already in corpus (unchanged): '{file_path.name}'. Skipping.",
+                            fg="yellow"
+                        )
+                        continue
+
+                    # Content has changed — prompt user
+                    replace = click.confirm(
+                        f"  Content has changed for '{file_path.name}'. Replace existing entry?",
+                        default=False
+                    )
+
+                    if replace:
+                        # Build history entry from old metadata
+                        history_entry = {
+                            'replaced_at': datetime.now(timezone.utc).isoformat(),
+                            'old_hash': existing_meta.get('hash'),
+                            'old_original_path': existing_meta.get('original_path'),
+                            'old_text_cache_path': existing_meta.get('text_cache_path'),
+                        }
+                        inherited_history = [history_entry] + existing_meta.get('version_history', [])
+
+                        # Delete old ChromaDB chunks, binary, and text cache
+                        old_chunk_ids = self.collection.get(
+                            where={"file_path": existing_key}, include=[]
+                        ).get('ids', [])
+                        if old_chunk_ids:
+                            self.collection.delete(ids=old_chunk_ids)
+                        self._delete_text_cache(existing_meta.get('text_cache_path'))
+                        if Path(existing_key).exists():
+                            Path(existing_key).unlink()
+                        del metadata[existing_key]
+
+                # ── Copy binary and read text ──────────────────────────────
                 file_id = str(uuid.uuid4())
                 destination_path = Path(self.corpus_path) / f"{file_id}{file_path.suffix}"
                 shutil.copy(file_path, destination_path)
-                metadata[str(destination_path)] = {
-                    'original_path': str(file_path),
+
+                # Read plain text for cache
+                documents = read_files([str(destination_path)])
+                plain_text = "\n\n".join(doc.get_content() for doc in documents) if documents else ""
+
+                # Write text cache
+                cache_path = self._write_text_cache(file_id, plain_text)
+
+                # Build metadata entry with provenance fields
+                entry = {
+                    'original_path': source_path_str,
                     'doc_type': doc_type,
                     'hash': file_hash,
-                    'added_at': datetime.now(timezone.utc).isoformat()
+                    'added_at': datetime.now(timezone.utc).isoformat(),
+                    'ingested_at': None,
+                    'pipeline': 'cogarc',
+                    'chunk_count': 0,
+                    'text_cache_path': cache_path,
                 }
+                if inherited_history:
+                    entry['version_history'] = inherited_history
+
+                metadata[str(destination_path)] = entry
                 click.echo(f"  > Added '{file_path.name}' to corpus manifest.")
                 self._save_metadata(metadata)
-                self._process_and_ingest_file(str(destination_path), doc_type)
+
+                # ── Ingest via pipeline ────────────────────────────────────
+                nodes = self._process_and_ingest_file(
+                    str(destination_path), doc_type, documents=documents
+                )
+
+                # Update provenance fields post-ingestion
+                metadata = self._load_metadata()
+                if str(destination_path) in metadata:
+                    metadata[str(destination_path)]['ingested_at'] = datetime.now(timezone.utc).isoformat()
+                    metadata[str(destination_path)]['chunk_count'] = len(nodes)
+                    self._save_metadata(metadata)
 
     def remove_from_corpus(self, identifier):
         target_path_in_corpus_str, meta = self._find_corpus_file(identifier)
@@ -187,6 +295,7 @@ class VectorManager:
             self.collection.delete(ids=chunk_ids_to_delete)
         if target_path_in_corpus.exists():
             target_path_in_corpus.unlink()
+        self._delete_text_cache(meta.get('text_cache_path'))
         metadata = self._load_metadata()
         del metadata[str(target_path_in_corpus)]
         self._save_metadata(metadata)
@@ -200,6 +309,62 @@ class VectorManager:
             return 0
         result = self.collection.get(where={"file_path": doc_id}, include=[])
         return len(result.get('ids', []))
+
+    # ── Provenance / Reconstitution ────────────────────────────────────────
+
+    def get_provenance(self, identifier) -> tuple:
+        """Return (True, {corpus_path, **meta}) or (False, error_msg)."""
+        corpus_path, meta = self._find_corpus_file(identifier)
+        if not corpus_path:
+            return False, f"File '{identifier}' not found in the corpus."
+        return True, {'corpus_path': corpus_path, **meta}
+
+    def reconstitute_document(self, identifier, from_store=False) -> tuple:
+        """Return (True, text) or (False, error_msg).
+
+        Primary: read from text_cache file.
+        Fallback (from_store=True or cache missing): reassemble from ChromaDB original_text fields.
+        """
+        corpus_path, meta = self._find_corpus_file(identifier)
+        if not corpus_path:
+            return False, f"File '{identifier}' not found in the corpus."
+
+        cache_path = meta.get('text_cache_path')
+        if not from_store and cache_path and Path(cache_path).exists():
+            with open(cache_path, encoding='utf-8') as f:
+                return True, f.read()
+
+        # Fallback: ChromaDB
+        results = self.collection.get(
+            where={"file_path": corpus_path},
+            include=["metadatas"]
+        )
+        metadatas = results.get('metadatas', [])
+        metadatas_sorted = sorted(metadatas, key=lambda m: m.get('chunk_index', 0))
+        parts = [m['original_text'] for m in metadatas_sorted if m.get('original_text')]
+        if parts:
+            return True, '\n\n'.join(parts)
+        return False, "No original_text found in vector store chunks."
+
+    def find_source_by_chunk(self, chunk_id: str) -> tuple:
+        """Return (True, info_dict) or (False, error_msg)."""
+        result = self.collection.get(ids=[chunk_id], include=["metadatas"])
+        metadatas = result.get('metadatas', [])
+        if not metadatas:
+            return False, f"Chunk ID '{chunk_id}' not found in vector store."
+        meta = metadatas[0]
+        file_path = meta.get('file_path')
+        corpus_meta = self._load_metadata().get(file_path, {}) if file_path else {}
+        return True, {
+            'chunk_id': chunk_id,
+            'chunk_index': meta.get('chunk_index'),
+            'chunk_count': corpus_meta.get('chunk_count', meta.get('chunk_count')),
+            'original_filename': meta.get('original_filename'),
+            **corpus_meta,
+            'corpus_path': file_path,
+        }
+
+    # ── Rebuild / Status ───────────────────────────────────────────────────
 
     def rebuild_vector_store(self):
         click.echo("  > Resetting vector store...")
@@ -261,8 +426,6 @@ class VectorManager:
             if os.path.exists(self.chroma_db_path):
                 shutil.rmtree(self.chroma_db_path)
             os.makedirs(self.chroma_db_path)
-            # Re-init is now tricky. This will re-call the (slow) fallback.
-            # This command is less critical in interactive mode.
             self.__init__(self.config)
             self._save_metadata({})
             click.secho("✅ New blank vector store created.", fg="green")

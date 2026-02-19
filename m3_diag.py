@@ -41,6 +41,7 @@ TEST_MODULES = [
     ("core/plugin_manager",      "tests.test_plugin_manager"),
     ("core/ingestion_pipeline",  "tests.test_ingestion_pipeline"),
     ("core/vector_manager",      "tests.test_vector_manager"),
+    ("core/provenance",          "tests.test_provenance"),
     ("core/analyze_manager",     "tests.test_analyze_manager"),
     ("core/session_manager",     "tests.test_session_manager"),
     ("cli/commands",             "tests.test_cli_commands"),
