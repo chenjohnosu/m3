@@ -1,8 +1,6 @@
-#
-# plugins/interpret.py
-#
 import click
 import textwrap
+from core.prompt_manager import PromptManager
 from plugins.base_plugin import BaseAnalyzerPlugin
 from llama_index.core.llms import ChatMessage
 
@@ -11,15 +9,6 @@ if "AnalyzeManager" not in globals():
     from typing import TypeVar
 
     AnalyzeManager = TypeVar("AnalyzeManager")
-
-# System prompt for the meta-summary
-SYSTEM_PROMPT = """
-You are an expert qualitative data analyst. You will be provided with a list of individual document summaries from a research corpus.
-Your task is to read all of them and synthesize them into a single, overarching "meta-summary" (3-5 paragraphs) that describes the entire collection as a whole.
-Identify the key, high-level themes, patterns, and any potential contradictions that emerge from the corpus.
-Do not just list the summaries; synthesize them.
-"""
-
 
 class InterpretPlugin(BaseAnalyzerPlugin):
     """
@@ -82,8 +71,10 @@ class InterpretPlugin(BaseAnalyzerPlugin):
 
         context_str = "\n\n".join(context_parts)
 
+        system_prompt = PromptManager().get('analysis_interpret')
+
         messages = [
-            ChatMessage(role="system", content=SYSTEM_PROMPT),
+            ChatMessage(role="system", content=system_prompt),
             ChatMessage(role="user", content=context_str)
         ]
 

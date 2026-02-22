@@ -1,25 +1,9 @@
 import click
 import json
 import re
+from core.prompt_manager import PromptManager
 from core.ingestion.stages.base_stage import BaseStage
 from llama_index.core.llms import ChatMessage
-
-# A new system prompt to guide the LLM in identifying high-level themes.
-SYSTEM_PROMPT = """
-You are an expert qualitative data analyst. Your task is to read a piece of text and identify its core underlying themes or topics.
-Analyze the provided text and perform the following actions:
-1.  Read the text to understand its main points and arguments.
-2.  Identify 2-4 distinct, high-level themes that capture the essence of the text. A theme should be a short phrase (3-5 words).
-3.  Structure your output as a single, valid JSON array of strings.
-4.  Each string in the array must be a single theme.
-
-Example Output: `["Online learning experiences", "Connection to the university", "Career preparation and skills"]`
-
-Important Rules:
--   Focus on the conceptual topics, not just keywords.
--   Ensure the final output is only the JSON array, with no explanations or conversational text.
-"""
-
 
 class CogArcStage1Structure(BaseStage):
 
@@ -30,6 +14,8 @@ class CogArcStage1Structure(BaseStage):
         if not docs_to_process:
             print("  > No documents to process for Stage 1.")
             return data
+
+        system_prompt = PromptManager().get('ingestion_structure')
 
         structured_docs = []
         for doc in docs_to_process:
@@ -46,7 +32,7 @@ class CogArcStage1Structure(BaseStage):
                     continue
 
                 messages = [
-                    ChatMessage(role="system", content=SYSTEM_PROMPT),
+                    ChatMessage(role="system", content=system_prompt),
                     ChatMessage(role="user", content=doc.text)
                 ]
 

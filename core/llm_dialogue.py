@@ -1,5 +1,6 @@
 import click
 import sys
+from core.prompt_manager import PromptManager
 from llama_index.core.chat_engine import ContextChatEngine
 from llama_index.core.memory import ChatMemoryBuffer
 
@@ -39,13 +40,7 @@ def start_dialogue(analyze_manager):
             retriever=retriever,
             llm=llm,
             memory=memory,
-            system_prompt=(
-                "You are a helpful research assistant specialized in qualitative analysis. "
-                "Answer the user's questions based ONLY on the context provided from the documents. "
-                "If the answer is not in the context, say so explicitly. "
-                "Do not hallucinate information. "
-                "When applicable, cite the specific documents (by filename) you used to form your answer."
-            )
+            system_prompt=PromptManager().get('dialogue_system')
         )
 
     except Exception as e:

@@ -1,18 +1,7 @@
 import click
+from core.prompt_manager import PromptManager
 from llama_index.core.llms import ChatMessage
 from core.ingestion.stages.base_stage import BaseStage
-
-SYSTEM_PROMPT = """
-You are an expert qualitative data analyst. Your task is to synthesize a collection of text chunks from a single document into a concise, abstractive summary.
-Analyze the provided text and perform the following actions:
-1.  Read all the text chunks to understand the document's main points, arguments, and narrative flow.
-2.  Generate a single, holistic summary (3-5 sentences) that captures the core essence and key takeaways of the entire document.
-3.  Ensure the summary is abstractive, meaning you should synthesize ideas in your own words rather than just extracting and combining sentences.
-hr
-Important Rules:
--   The final output should be only the summary text, with no explanations, conversational text, or preamble like "Here is the summary:".
--   Focus on the overarching themes and conclusions from the text.
-"""
 
 class CogArcStage3Synthesis(BaseStage):
     def process(self, data):
@@ -23,6 +12,8 @@ class CogArcStage3Synthesis(BaseStage):
             print("  > No nodes to synthesize for Stage 3.")
             return data
 
+        system_prompt = PromptManager().get('ingestion_synthesis')
+
         try:
             # --- FULL LLM IMPLEMENTATION ---
             # 1. Combine the content of all nodes into a single text block.
@@ -31,7 +22,7 @@ class CogArcStage3Synthesis(BaseStage):
 
             # 2. Prepare the messages for the LLM.
             messages = [
-                ChatMessage(role="system", content=SYSTEM_PROMPT),
+                ChatMessage(role="system", content=system_prompt),
                 ChatMessage(role="user", content=full_text)
             ]
 

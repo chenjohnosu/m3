@@ -1,25 +1,8 @@
 import click
+from core.prompt_manager import PromptManager
 from core.ingestion.stages.base_stage import BaseStage
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.llms import ChatMessage
-
-# A system prompt designed to generate a concise, relevant question for a chunk of text.
-# --- UPDATED: Removed all examples to prevent "prompt bleed" ---
-SYSTEM_PROMPT = """
-You are an expert in synthesizing information. Your task is to read the following text chunk and generate a single, concise, and relevant question that this text could answer.
-The question should be a natural-language query that a user might ask to find this specific information.
-
----
-IMPORTANT RULES:
-1.  Your output MUST be only the question itself.
-2.  Do NOT include any preamble like "Here is the question:".
-3.  Do NOT copy any part of this system prompt.
-4.  Generate ONE question ONLY.
-5.  The output must be a single string, not a JSON object.
----
-
-Read the text below and provide only the question.
-"""
 
 
 class CogArcStage2Enrich(BaseStage):
@@ -33,6 +16,8 @@ class CogArcStage2Enrich(BaseStage):
             print("  > No documents to process for Stage 2.")
             return data
 
+        system_prompt = PromptManager().get('ingestion_enrich')
+
         # Use the SentenceSplitter to create the final text chunks (nodes).
         # We can configure this from config.yaml in a future update.
         splitter = SentenceSplitter(chunk_size=512, chunk_overlap=100)
@@ -44,7 +29,7 @@ class CogArcStage2Enrich(BaseStage):
                 click.echo(f"  > Enriching chunk {i + 1}/{len(nodes)}...")
 
                 messages = [
-                    ChatMessage(role="system", content=SYSTEM_PROMPT),
+                    ChatMessage(role="system", content=system_prompt),
                     ChatMessage(role="user", content=node.get_content())
                 ]
 

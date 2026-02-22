@@ -6,26 +6,33 @@ from core.plugin_manager import PluginManager
 from core.vector_manager import VectorManager
 from core.analyze_manager import AnalyzeManager
 
+
 class M3Session:
     """
     Manages the persistent state for an M3 interactive session.
     This object is created once and passed into the click context (ctx.obj).
     """
+
     def __init__(self):
-        click.echo("Initializing M3 session...")
+        click.echo("Initializing M3 session components...")
         try:
             self.config = get_config()
             self.project_manager = ProjectManager()
             self.llm_manager = LLMManager(self.config)
-            self.plugin_manager = PluginManager()
 
-            # --- Project-specific ---
+            click.echo("Loading plugins...", nl=False)
+            self.plugin_manager = PluginManager()
+            click.echo(" Done.")
+
+            # --- Project-specific (Lazy Loaded) ---
             self.active_project_name = None
             self.active_project_path = None
-            self.vector_manager = None
-            self.analyze_manager = None
 
-            # Load the active project on startup
+            # Internal storage for lazy properties
+            self._vector_manager = None
+            self._analyze_manager = None
+
+            # Load the active project info (fast)
             active_name, _ = self.project_manager.get_active_project()
             if active_name:
                 self.load_project(active_name)
@@ -38,16 +45,51 @@ class M3Session:
             click.secho("  > Exiting.", fg="red")
             exit(1)
 
+    @property
+    def vector_manager(self):
+        """Lazy loader for VectorManager."""
+        if self._vector_manager is None and self.active_project_name:
+            click.secho(f"  > Initializing VectorManager for '{self.active_project_name}'...", dim=True)
+            try:
+                self._vector_manager = VectorManager(
+                    self.config,
+                    self.active_project_name,
+                    self.active_project_path,
+                    self.llm_manager
+                )
+            except Exception as e:
+                click.secho(f"🔥 Error initializing VectorManager: {e}", fg="red")
+                return None
+        return self._vector_manager
+
+    @property
+    def analyze_manager(self):
+        """Lazy loader for AnalyzeManager."""
+        if self._analyze_manager is None and self.active_project_name:
+            click.secho(f"  > Initializing AnalyzeManager for '{self.active_project_name}'...", dim=True)
+            try:
+                self._analyze_manager = AnalyzeManager(
+                    self.config,
+                    self.active_project_name,
+                    self.active_project_path,
+                    self.llm_manager,
+                    self.plugin_manager
+                )
+            except Exception as e:
+                click.secho(f"🔥 Error initializing AnalyzeManager: {e}", fg="red")
+                return None
+        return self._analyze_manager
+
     def load_project(self, project_name):
         """
-        Loads a new project into the session, re-instantiating
-        the necessary project-specific managers.
+        Sets the active project path but does NOT instantiate managers immediately.
+        They will be loaded on first access via properties.
         """
         if project_name is None:
             self.active_project_name = None
             self.active_project_path = None
-            self.vector_manager = None
-            self.analyze_manager = None
+            self._vector_manager = None
+            self._analyze_manager = None
             click.echo("Active project cleared.")
             return
 
@@ -56,35 +98,13 @@ class M3Session:
             click.secho(f"Error: Could not load project '{project_name}'.", fg="red")
             return
 
-        try:
-            click.echo(f"Loading project '{project_name}' into session...")
-            self.active_project_name = project_name
-            self.active_project_path = project_path
+        # Just set the paths and clear the cached managers
+        self.active_project_name = project_name
+        self.active_project_path = project_path
+        self._vector_manager = None
+        self._analyze_manager = None
 
-            # Instantiate project-specific managers
-            self.vector_manager = VectorManager(
-                self.config,
-                self.active_project_name,
-                self.active_project_path,
-                self.llm_manager
-            )
-
-            self.analyze_manager = AnalyzeManager(
-                self.config,
-                self.active_project_name,
-                self.active_project_path,
-                self.llm_manager,
-                self.plugin_manager
-            )
-
-            click.echo(f"Successfully loaded '{project_name}'.")
-
-        except Exception as e:
-            click.secho(f"🔥 Error loading project '{project_name}': {e}", fg="red")
-            self.active_project_name = None
-            self.active_project_path = None
-            self.vector_manager = None
-            self.analyze_manager = None
+        click.echo(f"Active project set to: '{project_name}'")
 
     def get_project_prompt(self):
         """Returns the prompt string for the REPL."""

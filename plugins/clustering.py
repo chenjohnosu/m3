@@ -7,26 +7,12 @@ from plugins.base_plugin import BaseAnalyzerPlugin
 from collections import defaultdict
 from llama_index.core.llms import ChatMessage
 
-# (Imports for AnalyzeManager, sklearn, and AXIAL_CODING_PROMPT remain the same)
-# ...
 # Forward-declare AnalyzeManager
 if "AnalyzeManager" not in globals():
     from typing import TypeVar
-
     AnalyzeManager = TypeVar("AnalyzeManager")
 
-# --- Clustering Dependencies ---
-try:
-    import numpy as np
-    from sklearn.cluster import AgglomerativeClustering
-    from sklearn.feature_extraction.text import TfidfVectorizer
-
-    SKLEARN_AVAILABLE = True
-except ImportError:
-    SKLEARN_AVAILABLE = False
-# -----------------------------
-
-# --- NEW: System prompt for Axial Coding ---
+# System prompt for Axial Coding
 AXIAL_CODING_PROMPT = """
 You are an expert qualitative data analyst. You will be given a list of "open codes" or "initial themes" identified in a set of related data chunks.
 Your task is to perform "axial coding" by synthesizing these initial themes into a single, more abstract "core theme" (3-7 words) that represents the central concept of the cluster.
@@ -38,10 +24,6 @@ Example Input:
 Example Output:
 {"axial_theme": "User frustration with information access"}
 """
-
-
-# -----------------------------------------
-
 
 class ClusteringPlugin(BaseAnalyzerPlugin):
     """
@@ -56,9 +38,15 @@ class ClusteringPlugin(BaseAnalyzerPlugin):
         Checks for '--save' flag in kwargs to persist metadata.
         """
 
-        # --- 1. Check for Dependencies ---
-        if not SKLEARN_AVAILABLE:
-            click.secho("🔥 Error: 'scikit-learn' is required for the clustering plugin.", fg="red")
+        # --- 1. Lazy Import Dependencies ---
+        click.echo("  > Loading clustering libraries...")
+        try:
+            import numpy as np
+            from sklearn.cluster import AgglomerativeClustering
+            from sklearn.feature_extraction.text import TfidfVectorizer
+        except ImportError as e:
+            click.secho("櫨 Error: 'scikit-learn' is required for the clustering plugin.", fg="red")
+            click.echo(f"  > Details: {e}")
             click.echo("  > Please install it by running: pip install scikit-learn")
             return
 
@@ -82,7 +70,7 @@ class ClusteringPlugin(BaseAnalyzerPlugin):
             if not llm:
                 raise ValueError("LLM is not available via AnalyzeManager.")
         except Exception as e:
-            click.secho(f"🔥 Error: Could not load LLM for theme synthesis: {e}", fg="red")
+            click.secho(f"櫨 Error: Could not load LLM for theme synthesis: {e}", fg="red")
             return
 
         # --- 4. Get All Data from Vector Store ---
@@ -91,7 +79,7 @@ class ClusteringPlugin(BaseAnalyzerPlugin):
                 include=["embeddings", "metadatas", "documents"]
             )
         except Exception as e:
-            click.secho(f"🔥 Error: Could not retrieve data from vector store: {e}", fg="red")
+            click.secho(f"櫨 Error: Could not retrieve data from vector store: {e}", fg="red")
             return
 
         ids = all_data.get('ids')
@@ -112,7 +100,7 @@ class ClusteringPlugin(BaseAnalyzerPlugin):
             clusterer = AgglomerativeClustering(n_clusters=k)
             labels = clusterer.fit_predict(embeddings_np)
         except Exception as e:
-            click.secho(f"🔥 Error during clustering: {e}", fg="red")
+            click.secho(f"櫨 Error during clustering: {e}", fg="red")
             return
 
         # --- 6. Group Chunks by Cluster ---
@@ -193,11 +181,10 @@ class ClusteringPlugin(BaseAnalyzerPlugin):
                                 fg="green")
 
                 except Exception as e:
-                    click.secho(f"  > 🔥 Error updating metadata in vector store: {e}", fg="red")
+                    click.secho(f"  > 櫨 Error updating metadata in vector store: {e}", fg="red")
             # -----------------------------------------------------------------
 
             # --- 10. Find Representative Terms (for display) ---
-            # (This logic remains the same as before)
             try:
                 cluster_texts = [c['document'] for c in chunks_in_cluster]
                 vectorizer = TfidfVectorizer(max_features=5, stop_words='english', ngram_range=(1, 2))
@@ -209,7 +196,6 @@ class ClusteringPlugin(BaseAnalyzerPlugin):
                 click.secho(f"  > Could not determine representative terms: {e}", fg="yellow")
 
             # --- 11. Print Chunk Samples (for display) ---
-            # (This logic remains the same as before)
             click.echo("  > Sample Chunks:")
             for chunk in chunks_in_cluster[:3]:
                 meta = chunk['metadata']

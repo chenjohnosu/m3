@@ -1,4 +1,5 @@
 from plugins.llm_base_plugin import LLMBaseAnalyzerPlugin
+from core.prompt_manager import PromptManager
 
 # Forward-declare AnalyzeManager
 if "AnalyzeManager" not in globals():
@@ -19,17 +20,6 @@ class CategorizePlugin(LLMBaseAnalyzerPlugin):
         Returns the system prompt for categorization.
         """
         if not options:
-            return (
-                "You are a text categorization assistant. The user failed to provide "
-                "categories. Please tell them to use the --options flag.\n\n"
-                "Example: /a run categorize \"feedback\" --options='Positive,Negative,Neutral'"
-            )
+            return PromptManager().get('plugin_categorize_error').format(query=query)
 
-        return (
-            "You are an expert text categorization assistant. "
-            "Analyze the provided context chunks and categorize each chunk "
-            f"in relation to the user's query: \"{query}\"\n\n"
-            f"Use *only* the following categories: {options}\n\n"
-            "List each chunk's source file and its assigned category. "
-            "Provide a brief justification for each categorization."
-        )
+        return PromptManager().get('plugin_categorize').format(query=query, options=options)

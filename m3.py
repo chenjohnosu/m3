@@ -4,6 +4,7 @@ import sys
 import uuid
 import contextlib
 import traceback
+import time
 
 from cli.project_commands import project
 from cli.corpus_commands import corpus
@@ -22,6 +23,7 @@ def cli(ctx, go, batch_file):
     """
     if ctx.invoked_subcommand is None:
         if go:
+            click.secho("--- Starting m3 interactive session ---", fg="cyan")
             # Pass a new M3Session into the context object
             # This is the core of the optimization
             interactive_mode(M3Session())

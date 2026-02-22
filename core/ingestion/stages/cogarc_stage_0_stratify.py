@@ -1,25 +1,10 @@
 import json
 import re
 import click
+from core.prompt_manager import PromptManager
 from core.ingestion.stages.base_stage import BaseStage
 from llama_index.core.schema import Document
 from llama_index.core.llms import ChatMessage
-
-SYSTEM_PROMPT = """
-You are an expert qualitative data analysis assistant. Your task is to read an interview transcript and stratify it into a series of questions and their corresponding answers.
-Analyze the provided transcript and perform the following actions:
-1.  Identify each question asked by the "Interviewer".
-2.  Identify the block of text that constitutes the "Interviewee's" answer to that question.
-3.  Structure your output as a single, valid JSON array of objects.
-4.  Each object in the array must represent a single answer and contain two keys:
-    - "question": A string containing the full text of the question.
-    - "answer": A string containing the full, corresponding block of text for the answer.
-Important Rules:
--   Ignore any introductory text or metadata at the beginning of the transcript.
--   Combine multi-part answers into a single "answer" block for the most recent question.
--   Ensure the final output is only the JSON array, with no explanations or conversational text.
-"""
-
 
 class CogArcStage0Stratify(BaseStage):
     def process(self, data):
@@ -28,10 +13,12 @@ class CogArcStage0Stratify(BaseStage):
         processed_documents = []  # This list will hold both stratified and fallback documents
         canonical_questions = set()
 
+        system_prompt = PromptManager().get('ingestion_stratify')
+
         for doc in documents:
             try:
                 messages = [
-                    ChatMessage(role="system", content=SYSTEM_PROMPT),
+                    ChatMessage(role="system", content=system_prompt),
                     ChatMessage(role="user", content=doc.text)
                 ]
 
@@ -60,7 +47,6 @@ class CogArcStage0Stratify(BaseStage):
                     answer = pair.get("answer")
 
                     if question and answer:
-                        # --- THIS IS THE FIX ---
                         # 1. Create a deep copy of the parent document's metadata.
                         #    This preserves 'original_filename' and any other metadata.
                         new_metadata = doc.metadata.copy()
