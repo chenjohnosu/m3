@@ -109,3 +109,16 @@ class M3Session:
     def get_project_prompt(self):
         """Returns the prompt string for the REPL."""
         return f"[m3:{self.active_project_name}]> " if self.active_project_name else "[m3]> "
+
+    def get_styled_prompt(self):
+        """Returns prompt_toolkit FormattedText for the styled prompt."""
+        from prompt_toolkit.formatted_text import FormattedText
+        project = self.active_project_name or 'm3'
+        return FormattedText([
+            ('class:bracket', '['),
+            ('class:appname', 'm3'),
+            ('class:colon',   ':'),
+            ('class:project', project),
+            ('class:bracket', ']'),
+            ('class:arrow',   '> '),
+        ])

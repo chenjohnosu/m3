@@ -1,5 +1,6 @@
 click
 PyYAML
+prompt_toolkit>=3.0
 
 # Vector Store
 chromadb

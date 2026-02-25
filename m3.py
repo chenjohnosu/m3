@@ -69,9 +69,19 @@ def show_subcommand_help(command_path):
 
 def interactive_mode(session: M3Session):
     """Starts a clean, simplified interactive REPL session."""
+    import os
+    from pathlib import Path
+    from cli.interactive_ui import build_prompt_session, get_toolbar
+
     click.echo("Entering interactive mode. Use '/quit' or '/q' to exit.")
 
-    # --- NEW: Alias mapping ---
+    # Persistent history file
+    history_path = str(Path.home() / ".monkey3" / "history")
+    os.makedirs(os.path.dirname(history_path), exist_ok=True)
+
+    pt_session = build_prompt_session(history_path)
+
+    # --- Alias mapping ---
     command_aliases = {
         'c': 'corpus',
         'p': 'project',
@@ -81,11 +91,11 @@ def interactive_mode(session: M3Session):
     }
 
     while True:
-        # Get prompt from the session
-        prompt = session.get_project_prompt()
-
         try:
-            command = input(prompt).strip()
+            command = pt_session.prompt(
+                session.get_styled_prompt(),
+                bottom_toolbar=lambda: get_toolbar(session),
+            ).strip()
 
             if not command:
                 continue
@@ -102,7 +112,7 @@ def interactive_mode(session: M3Session):
 
             cmd = args[0].lower()
 
-            # --- NEW: Resolve alias ---
+            # Resolve alias
             if cmd in command_aliases:
                 cmd = command_aliases[cmd]
                 args[0] = cmd  # Update the args list with the resolved command
@@ -129,7 +139,7 @@ def interactive_mode(session: M3Session):
                 show_subcommand_help(cmd)
                 continue
 
-            # --- MODIFIED: Pass the session object (ctx.obj) to the command ---
+            # Pass the session object (ctx.obj) to the command
             with cli.make_context(cli.name, args, resilient_parsing=True, obj=session) as ctx:
                 cli.invoke(ctx)
 
