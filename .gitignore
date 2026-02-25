@@ -15,3 +15,4 @@ Thumbs.db
 
 # Claude Code tool config (local only)
 .claude/
+/dummy_data/
