@@ -1,3 +1,4 @@
+import glob as glob_module
 import click
 from core.vector_manager import VectorManager
 from utils.config import get_config
@@ -15,6 +16,32 @@ def _get_manager(ctx):
     return VectorManager(get_config())
 
 
+def _resolve_paths(raw_paths):
+    """Expand glob patterns and validate all paths.
+
+    Returns (resolved, errors) where resolved is a list of existing path
+    strings and errors is a list of (pattern, message) tuples for anything
+    that didn't match.
+    """
+    resolved = []
+    errors = []
+    for raw in raw_paths:
+        has_glob = any(c in raw for c in ('*', '?', '['))
+        if has_glob:
+            matches = glob_module.glob(raw, recursive=True)
+            if not matches:
+                errors.append((raw, "no files matched glob pattern"))
+            else:
+                resolved.extend(matches)
+        else:
+            p = Path(raw)
+            if p.exists():
+                resolved.append(str(p))
+            else:
+                errors.append((raw, "path does not exist"))
+    return resolved, errors
+
+
 # ── Command group ──────────────────────────────────────────────────────────
 
 @click.group()
@@ -24,16 +51,30 @@ def corpus():
 
 
 @corpus.command('add')
-@click.argument('paths', nargs=-1, type=click.Path(exists=True, readable=True))
+@click.argument('paths', nargs=-1)
 @click.option('--type', 'doc_type',
               type=click.Choice(get_config().get('ingestion_config', {}).get('known_doc_types', ['document'])),
               default=None,
               help='The type of document being added.')
 @click.pass_context
 def add(ctx, paths, doc_type):
-    """Adds one or more files/directories to the active project's corpus."""
+    """Adds one or more files, directories, or glob patterns to the corpus.
+
+    Supports wildcards: /c add "data/*.docx" --type interview
+    Recursive globs:    /c add "data/**/*.txt"
+    Mixed inputs:       /c add file.pdf "notes/*.md" some_dir/
+    """
     if not paths:
         click.echo("Error: No file paths provided.")
+        return
+
+    resolved, errors = _resolve_paths(paths)
+
+    for pattern, msg in errors:
+        click.secho(f"  Warning: '{pattern}' — {msg}", fg="yellow")
+
+    if not resolved:
+        click.secho("Error: No valid paths to add.", fg="red")
         return
 
     config = get_config()
@@ -41,14 +82,17 @@ def add(ctx, paths, doc_type):
         doc_type = config.get('ingestion_config', {}).get('default_doc_type', 'document')
         click.echo(f"No --type specified, using default: '{doc_type}'")
 
+    if len(resolved) != len(paths):
+        click.echo(f"  > Resolved {len(resolved)} path(s) from {len(paths)} input(s).")
+
     try:
         manager = _get_manager(ctx)
         if not manager:
             click.secho("Error: No active project. Please use '/project active <name>'.", fg="red")
             return
 
-        manager.add_to_corpus(list(paths), doc_type)
-        click.secho(f"\n✅ Successfully added and processed {len(paths)} path(s).", fg="green")
+        manager.add_to_corpus(resolved, doc_type)
+        click.secho(f"\n✅ Successfully added and processed {len(resolved)} path(s).", fg="green")
     except Exception as e:
         click.secho(f"🔥 Error: {e}", fg="red")
 

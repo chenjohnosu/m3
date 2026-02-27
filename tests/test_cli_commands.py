@@ -183,6 +183,102 @@ class TestMainCLI(unittest.TestCase):
 
 
 # ─────────────────────────────────────────────
+# _resolve_paths (glob expansion helper)
+# ─────────────────────────────────────────────
+
+@unittest.skipUnless(CORPUS_OK, "corpus_commands import failed")
+class TestResolvePaths(unittest.TestCase):
+    """Tests for the _resolve_paths glob-expansion helper."""
+
+    def setUp(self):
+        from cli.corpus_commands import _resolve_paths
+        self._resolve = _resolve_paths
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def _make(self, *rel_paths):
+        """Create files and return their absolute path strings."""
+        created = []
+        for rel in rel_paths:
+            p = os.path.join(self.tmp, rel)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            open(p, 'w').close()
+            created.append(p)
+        return created
+
+    # -- Literal paths -------------------------------------------------------
+
+    def test_single_existing_file(self):
+        (f,) = self._make("a.txt")
+        resolved, errors = self._resolve([f])
+        self.assertEqual(resolved, [f])
+        self.assertEqual(errors, [])
+
+    def test_single_existing_directory(self):
+        d = os.path.join(self.tmp, "subdir")
+        os.makedirs(d)
+        resolved, errors = self._resolve([d])
+        self.assertEqual(resolved, [d])
+        self.assertEqual(errors, [])
+
+    def test_nonexistent_literal_path_yields_error(self):
+        bad = os.path.join(self.tmp, "ghost.txt")
+        resolved, errors = self._resolve([bad])
+        self.assertEqual(resolved, [])
+        self.assertEqual(len(errors), 1)
+        self.assertIn("ghost.txt", errors[0][0])
+
+    # -- Glob patterns -------------------------------------------------------
+
+    def test_simple_glob_matches_files(self):
+        self._make("doc1.txt", "doc2.txt", "img.png")
+        pattern = os.path.join(self.tmp, "*.txt")
+        resolved, errors = self._resolve([pattern])
+        self.assertEqual(len(resolved), 2)
+        self.assertTrue(all(r.endswith(".txt") for r in resolved))
+        self.assertEqual(errors, [])
+
+    def test_recursive_glob(self):
+        self._make("sub/a.md", "sub/b.md", "top.md")
+        pattern = os.path.join(self.tmp, "**", "*.md")
+        resolved, errors = self._resolve([pattern])
+        self.assertEqual(len(resolved), 3)
+        self.assertEqual(errors, [])
+
+    def test_glob_no_match_yields_error(self):
+        pattern = os.path.join(self.tmp, "*.docx")
+        resolved, errors = self._resolve([pattern])
+        self.assertEqual(resolved, [])
+        self.assertEqual(len(errors), 1)
+        self.assertIn("no files matched", errors[0][1])
+
+    # -- Mixed inputs --------------------------------------------------------
+
+    def test_mix_of_literal_and_glob(self):
+        (literal,) = self._make("exact.pdf")
+        self._make("note1.md", "note2.md")
+        pattern = os.path.join(self.tmp, "*.md")
+        resolved, errors = self._resolve([literal, pattern])
+        self.assertEqual(len(resolved), 3)
+        self.assertIn(literal, resolved)
+        self.assertEqual(errors, [])
+
+    def test_partial_failure_still_returns_valid(self):
+        (good,) = self._make("good.txt")
+        bad = os.path.join(self.tmp, "missing.txt")
+        resolved, errors = self._resolve([good, bad])
+        self.assertEqual(resolved, [good])
+        self.assertEqual(len(errors), 1)
+
+    def test_empty_input_returns_empty(self):
+        resolved, errors = self._resolve([])
+        self.assertEqual(resolved, [])
+        self.assertEqual(errors, [])
+
+
+# ─────────────────────────────────────────────
 # Import status report
 # ─────────────────────────────────────────────
 
