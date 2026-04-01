@@ -2,7 +2,6 @@ import click
 import textwrap
 from abc import abstractmethod
 from plugins.base_plugin import BaseAnalyzerPlugin
-from llama_index.core.llms import ChatMessage
 
 # Forward-declare AnalyzeManager
 if "AnalyzeManager" not in globals():
@@ -100,6 +99,7 @@ class LLMBaseAnalyzerPlugin(BaseAnalyzerPlugin):
         system_prompt = self.get_system_prompt(query, options)
         user_prompt = f"Here is the context to analyze:\n\n{context_str}"
 
+        from llama_index.core.llms import ChatMessage
         messages = [
             ChatMessage(role="system", content=system_prompt),
             ChatMessage(role="user", content=user_prompt)

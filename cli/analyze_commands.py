@@ -1,7 +1,5 @@
 import click
-from core.analyze_manager import AnalyzeManager
 from utils.config import get_config
-from core.plugin_manager import PluginManager
 
 
 @click.group()
@@ -18,6 +16,7 @@ def _get_manager(ctx):
             return None
         return manager
     else:
+        from core.analyze_manager import AnalyzeManager
         click.secho("  > (Single Command Mode) Initializing AnalyzeManager...", dim=True)
         try:
             return AnalyzeManager(get_config())
@@ -89,6 +88,7 @@ def tools(ctx):
         if ctx.obj and hasattr(ctx.obj, 'plugin_manager'):
             manager = ctx.obj.plugin_manager
         else:
+            from core.plugin_manager import PluginManager
             click.secho("  > (Single Command Mode) Initializing PluginManager...", dim=True)
             manager = PluginManager()
         # --- END MODIFIED ---

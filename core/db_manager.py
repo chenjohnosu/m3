@@ -2,11 +2,7 @@
 Manages shared, singleton instances of database clients and models
 to prevent "different settings" errors.
 """
-import chromadb
 import click
-from chromadb.config import Settings as ChromaSettings
-from llama_index.core import Settings as LlamaSettings
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
 _cached_embed_model = None
 _cached_chroma_client = None
@@ -18,6 +14,7 @@ def get_embed_model(model_name, device=None):
     """
     global _cached_embed_model
     if _cached_embed_model is None:
+        from llama_index.embeddings.huggingface import HuggingFaceEmbedding
         # We use err=True to ensure this logs outside of a --quiet flag
         click.echo(f"INFO: Loading embedding model '{model_name}' on device '{device or 'default'}'...", err=True)
         # E5 models should use normalize=True for cosine similarity
@@ -35,6 +32,8 @@ def get_chroma_client(db_path):
     """
     global _cached_chroma_client
     if _cached_chroma_client is None:
+        import chromadb
+        from chromadb.config import Settings as ChromaSettings
         click.echo(f"INFO: Initializing ChromaDB PersistentClient at '{db_path}'...", err=True)
         _cached_chroma_client = chromadb.PersistentClient(
             path=db_path,

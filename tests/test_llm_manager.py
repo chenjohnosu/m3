@@ -29,14 +29,14 @@ class TestLLMManager(unittest.TestCase):
             }
         }
 
-    @patch('core.llm_manager.Ollama')
+    @patch('llama_index.llms.ollama.Ollama')
     def test_load_clients(self, mock_ollama):
         from core.llm_manager import LLMManager
         manager = LLMManager(self.config)
         self.assertIn('ollama_client', manager.clients)
         self.assertEqual(manager.clients['ollama_client']['base_url'], 'http://localhost:11434')
 
-    @patch('core.llm_manager.Ollama')
+    @patch('llama_index.llms.ollama.Ollama')
     def test_get_llm_returns_instance(self, mock_ollama):
         mock_ollama.return_value = MagicMock()
         from core.llm_manager import LLMManager
@@ -45,7 +45,7 @@ class TestLLMManager(unittest.TestCase):
         self.assertIsNotNone(llm)
         mock_ollama.assert_called_once()
 
-    @patch('core.llm_manager.Ollama')
+    @patch('llama_index.llms.ollama.Ollama')
     def test_get_llm_caches_instance(self, mock_ollama):
         mock_ollama.return_value = MagicMock()
         from core.llm_manager import LLMManager
@@ -56,7 +56,7 @@ class TestLLMManager(unittest.TestCase):
         # Should only instantiate once
         self.assertEqual(mock_ollama.call_count, 1)
 
-    @patch('core.llm_manager.Ollama')
+    @patch('llama_index.llms.ollama.Ollama')
     def test_get_llm_different_keys(self, mock_ollama):
         mock_ollama.return_value = MagicMock()
         from core.llm_manager import LLMManager
@@ -67,7 +67,7 @@ class TestLLMManager(unittest.TestCase):
         self.assertIsNotNone(llm1)
         self.assertIsNotNone(llm2)
 
-    @patch('core.llm_manager.Ollama')
+    @patch('llama_index.llms.ollama.Ollama')
     def test_get_llm_invalid_key_raises(self, mock_ollama):
         from core.llm_manager import LLMManager
         manager = LLMManager(self.config)
@@ -80,7 +80,7 @@ class TestLLMManager(unittest.TestCase):
         manager = LLMManager(config)
         self.assertEqual(len(manager.clients), 0)
 
-    @patch('core.llm_manager.Ollama')
+    @patch('llama_index.llms.ollama.Ollama')
     def test_maps_model_roles_correctly(self, mock_ollama):
         mock_ollama.return_value = MagicMock()
         from core.llm_manager import LLMManager

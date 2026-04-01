@@ -23,14 +23,14 @@ class TestGetEmbedModel(unittest.TestCase):
     def tearDown(self):
         db_module._cached_embed_model = None
 
-    @patch('core.db_manager.HuggingFaceEmbedding')
+    @patch('llama_index.embeddings.huggingface.HuggingFaceEmbedding')
     def test_creates_embed_model(self, mock_hf):
         mock_hf.return_value = MagicMock()
         model = db_module.get_embed_model('intfloat/multilingual-e5-large')
         self.assertIsNotNone(model)
         mock_hf.assert_called_once_with(model_name='intfloat/multilingual-e5-large', normalize=True)
 
-    @patch('core.db_manager.HuggingFaceEmbedding')
+    @patch('llama_index.embeddings.huggingface.HuggingFaceEmbedding')
     def test_returns_cached_model(self, mock_hf):
         mock_hf.return_value = MagicMock()
         model1 = db_module.get_embed_model('intfloat/multilingual-e5-large')
@@ -47,14 +47,14 @@ class TestGetChromaClient(unittest.TestCase):
     def tearDown(self):
         db_module._cached_chroma_client = None
 
-    @patch('core.db_manager.chromadb.PersistentClient')
+    @patch('chromadb.PersistentClient')
     def test_creates_chroma_client(self, mock_client):
         mock_client.return_value = MagicMock()
         client = db_module.get_chroma_client('/tmp/test_db')
         self.assertIsNotNone(client)
         mock_client.assert_called_once()
 
-    @patch('core.db_manager.chromadb.PersistentClient')
+    @patch('chromadb.PersistentClient')
     def test_returns_cached_client(self, mock_client):
         mock_client.return_value = MagicMock()
         c1 = db_module.get_chroma_client('/tmp/test_db')
@@ -62,7 +62,7 @@ class TestGetChromaClient(unittest.TestCase):
         self.assertIs(c1, c2)
         self.assertEqual(mock_client.call_count, 1)
 
-    @patch('core.db_manager.chromadb.PersistentClient')
+    @patch('chromadb.PersistentClient')
     def test_client_has_allow_reset(self, mock_client):
         mock_client.return_value = MagicMock()
         db_module.get_chroma_client('/tmp/test_db')

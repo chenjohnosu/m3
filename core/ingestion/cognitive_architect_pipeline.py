@@ -7,8 +7,6 @@ from core.ingestion.stages.cogarc_stage_1_structure import CogArcStage1Structure
 from core.ingestion.stages.cogarc_stage_2_enrich import CogArcStage2Enrich
 from core.ingestion.stages.cogarc_stage_3_synthesis import CogArcStage3Synthesis
 from core.llm_manager import LLMManager
-# --- NEW: Import TextNode to create nodes ---
-from llama_index.core.schema import TextNode
 import hashlib
 
 logger = logging.getLogger(__name__)
@@ -235,6 +233,7 @@ class CognitiveArchitectPipeline(BasePipeline):
 
     def _create_nodes_from_docs(self, docs):
         """Helper to convert LlamaIndex Documents to TextNodes."""
+        from llama_index.core.schema import TextNode
         nodes = []
         for doc in docs:
             node = TextNode(

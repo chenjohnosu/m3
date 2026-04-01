@@ -11,6 +11,13 @@ if "AnalyzeManager" not in globals():
 
     AnalyzeManager = TypeVar("AnalyzeManager")
 
+try:
+    import matplotlib  # noqa: F401
+    import sklearn  # noqa: F401
+    VIZ_AVAILABLE = True
+except ImportError:
+    VIZ_AVAILABLE = False
+
 
 class VisualizePlugin(BaseAnalyzerPlugin):
     """

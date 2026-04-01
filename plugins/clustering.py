@@ -5,12 +5,17 @@ import json
 import re
 from plugins.base_plugin import BaseAnalyzerPlugin
 from collections import defaultdict
-from llama_index.core.llms import ChatMessage
 
 # Forward-declare AnalyzeManager
 if "AnalyzeManager" not in globals():
     from typing import TypeVar
     AnalyzeManager = TypeVar("AnalyzeManager")
+
+try:
+    import sklearn  # noqa: F401
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
 
 # System prompt for Axial Coding
 AXIAL_CODING_PROMPT = """
@@ -135,6 +140,7 @@ class ClusteringPlugin(BaseAnalyzerPlugin):
                         cluster_themes.extend([t.strip() for t in themes_list if t.strip()])
 
                 if cluster_themes:
+                    from llama_index.core.llms import ChatMessage
                     unique_themes = sorted(list(set(cluster_themes)))
                     messages = [
                         ChatMessage(role="system", content=AXIAL_CODING_PROMPT),

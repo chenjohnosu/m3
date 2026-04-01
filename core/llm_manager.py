@@ -1,4 +1,3 @@
-from llama_index.llms.ollama import Ollama
 from utils.config import get_config
 import click
 
@@ -68,6 +67,7 @@ class LLMManager:
                     err=True)
 
                 # --- 2. Create the new LLM instance ---
+                from llama_index.llms.ollama import Ollama
                 llm_instance = Ollama(
                     model=model_info['model_name'],
                     base_url=client_data['base_url'],

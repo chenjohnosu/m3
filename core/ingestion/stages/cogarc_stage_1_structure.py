@@ -3,7 +3,6 @@ import json
 import re
 from core.prompt_manager import PromptManager
 from core.ingestion.stages.base_stage import BaseStage
-from llama_index.core.llms import ChatMessage
 
 class CogArcStage1Structure(BaseStage):
 
@@ -31,6 +30,7 @@ class CogArcStage1Structure(BaseStage):
                     structured_docs.append(doc)
                     continue
 
+                from llama_index.core.llms import ChatMessage
                 messages = [
                     ChatMessage(role="system", content=system_prompt),
                     ChatMessage(role="user", content=doc.text)

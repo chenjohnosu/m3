@@ -7,6 +7,12 @@ if "AnalyzeManager" not in globals():
 
     AnalyzeManager = TypeVar("AnalyzeManager")
 
+try:
+    import sklearn  # noqa: F401
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
+
 
 class AnomalyPlugin(BaseAnalyzerPlugin):
     """

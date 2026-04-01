@@ -49,7 +49,6 @@ class M3System:
         self,
         config: dict | None = None,
         project_name: str | None = None,
-        project_path: Path | None = None,
     ) -> None:
         """
         Initialize M3System.
@@ -59,9 +58,6 @@ class M3System:
                           If None, loads from ~/.monkey3/config.yaml.
             project_name: If provided, immediately opens this project by name
                           (looked up in ~/.monkey3/projects/).
-            project_path: If provided, open or initialize a project at this
-                          explicit filesystem path (bypasses ProjectManager).
-                          Takes precedence over project_name.
         """
         self._config = config or get_config()
         self._project_manager = ProjectManager()
@@ -74,42 +70,12 @@ class M3System:
         self._analyze_manager = None
         self._pipeline = None
 
-        if project_path is not None:
-            self._open_project_by_path(Path(project_path))
-        elif project_name:
+        if project_name:
             self.open_project(project_name)
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
-
-    def _open_project_by_path(self, project_path: Path) -> None:
-        """
-        Open or initialize a project at an explicit filesystem path.
-        Bypasses ProjectManager — used when the caller controls the project directory
-        (e.g., an embedding application that owns its own project layout).
-        """
-        project_path = project_path.expanduser()
-        project_path.mkdir(parents=True, exist_ok=True)
-        # Ensure corpus subdirectory exists (VectorManager expects it)
-        (project_path / "corpus").mkdir(exist_ok=True)
-
-        from core.vector_manager import VectorManager
-        from core.analyze_manager import AnalyzeManager
-        from core.ingestion.pipeline_factory import get_pipeline
-
-        project_name = project_path.name
-        self._current_project = project_name
-        self._current_project_path = str(project_path)
-
-        self._vector_manager = VectorManager(
-            self._config, project_name, str(project_path), self._llm_manager
-        )
-        self._analyze_manager = AnalyzeManager(
-            self._config, project_name, str(project_path), self._llm_manager, self._plugin_manager
-        )
-        self._pipeline = get_pipeline('cogarc', self._config, self._llm_manager)
-        logger.info(f"Opened project by path: {project_path}")
 
     def create_project(self, name: str) -> None:
         """
@@ -421,22 +387,6 @@ class M3System:
         """Return ordered list of all pipeline stages (built-in + registered)."""
         self._require_open_project()
         return self._pipeline.list_stages()
-
-    def register_stage(
-        self,
-        name: str,
-        stage_fn: Callable,
-        position: str = "append",
-    ) -> None:
-        """
-        Simplified alias for register_pipeline_stage.
-
-        Args:
-            name:     Unique stage name.
-            stage_fn: Callable(data: dict) -> dict
-            position: "append" | "after:<stage_name>" | "before:<stage_name>"
-        """
-        self.register_pipeline_stage(name=name, stage_fn=stage_fn, position=position)
 
     # ------------------------------------------------------------------
     # Internal helpers

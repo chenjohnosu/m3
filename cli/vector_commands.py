@@ -1,5 +1,4 @@
 import click
-from core.vector_manager import VectorManager
 from utils.config import get_config
 
 
@@ -18,6 +17,7 @@ def _get_manager(ctx):
             return None
         return manager
     else:
+        from core.vector_manager import VectorManager
         click.secho("  > (Single Command Mode) Initializing VectorManager...", dim=True)
         try:
             return VectorManager(get_config())

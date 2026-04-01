@@ -1,8 +1,6 @@
 import click
 import sys
 from core.prompt_manager import PromptManager
-from llama_index.core.chat_engine import ContextChatEngine
-from llama_index.core.memory import ChatMemoryBuffer
 
 
 def start_dialogue(analyze_manager):
@@ -20,6 +18,9 @@ def start_dialogue(analyze_manager):
     click.echo("------------------------------------------------")
 
     try:
+        from llama_index.core.chat_engine import ContextChatEngine
+        from llama_index.core.memory import ChatMemoryBuffer
+
         # 1. Get the retrieval engine (index) from the manager
         #    We configure it to retrieve the top 5 most relevant chunks.
         retriever = analyze_manager.index.as_retriever(similarity_top_k=5)

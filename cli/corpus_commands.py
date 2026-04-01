@@ -1,6 +1,5 @@
 import glob as glob_module
 import click
-from core.vector_manager import VectorManager
 from utils.config import get_config
 from pathlib import Path
 import textwrap
@@ -12,6 +11,7 @@ def _get_manager(ctx):
     """Return VectorManager from session or create a fresh one."""
     if ctx.obj and hasattr(ctx.obj, 'vector_manager'):
         return ctx.obj.vector_manager
+    from core.vector_manager import VectorManager
     click.secho("  > (Single Command Mode) Initializing VectorManager...", dim=True)
     return VectorManager(get_config())
 
