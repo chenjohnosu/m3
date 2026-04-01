@@ -136,6 +136,31 @@ class VectorManager:
                 return path, meta
         return None, None
 
+    # ── Path resolution helpers ────────────────────────────────────────────
+
+    def _resolve_original_path(self, orig_str: str) -> Path | None:
+        """Return the first existing Path for orig_str, trying several bases.
+
+        Old metadata entries may store relative paths.  We check:
+          1. The path as stored (works for absolute paths and relative paths
+             when CWD matches the original working directory).
+          2. Relative to the current working directory.
+          3. Relative to the project root directory.
+        Returns None if the file cannot be found by any strategy.
+        """
+        candidates = [
+            Path(orig_str),
+            Path.cwd() / orig_str,
+            Path(self.project_path).parent / orig_str,
+        ]
+        for candidate in candidates:
+            try:
+                if candidate.exists():
+                    return candidate
+            except OSError:
+                pass
+        return None
+
     # ── Find any entry matching by original_path ───────────────────────────
 
     def _find_by_original_path(self, source_path_str: str, metadata: dict):
@@ -198,7 +223,9 @@ class VectorManager:
                     continue
 
                 file_hash = get_file_hash(file_path)
-                source_path_str = str(file_path)
+                # Always store absolute path so the entry remains valid
+                # regardless of the working directory used in future runs.
+                source_path_str = str(file_path.resolve())
 
                 # ── Duplicate / replace detection ──────────────────────────
                 existing_key, existing_meta = self._find_by_original_path(source_path_str, metadata)
@@ -558,27 +585,37 @@ class VectorManager:
         missing = []
 
         for orig_str, (corpus_key, meta) in known_paths.items():
-            orig = Path(orig_str)
-            if not orig.exists():
+            resolved = self._resolve_original_path(orig_str)
+            if resolved is None:
                 missing.append((orig_str, corpus_key, meta))
             else:
-                current_hash = get_file_hash(orig)
+                current_hash = get_file_hash(resolved)
                 if current_hash != meta.get('hash'):
-                    changed.append((orig_str, corpus_key, meta, current_hash))
+                    changed.append((str(resolved), corpus_key, meta, current_hash))
 
-        # Scan source directories for files not yet in the corpus
+        # Scan source directories for files not yet in the corpus.
+        # Resolve each source directory the same way so we can compare
+        # absolute paths against the (possibly relative) known_paths keys.
+        known_resolved = set()
+        for orig_str in known_paths:
+            r = self._resolve_original_path(orig_str)
+            if r:
+                known_resolved.add(str(r.resolve()))
+
         new = []
         for dir_str in source_dirs:
-            src_dir = Path(dir_str)
-            if not src_dir.is_dir():
+            # Resolve the source directory itself
+            src_dir_resolved = self._resolve_original_path(dir_str)
+            if src_dir_resolved is None or not src_dir_resolved.is_dir():
                 continue
-            for file_path in src_dir.iterdir():
+            for file_path in src_dir_resolved.iterdir():
                 if not file_path.is_file():
                     continue
                 if file_path.suffix.lower() not in self._SCANNABLE_EXTENSIONS:
                     continue
-                if str(file_path) not in known_paths:
-                    new.append(str(file_path))
+                abs_str = str(file_path.resolve())
+                if abs_str not in known_resolved:
+                    new.append(abs_str)
 
         return {'changed': changed, 'new': new, 'missing': missing}
 
@@ -593,9 +630,9 @@ class VectorManager:
         """
         original_path = meta.get('original_path')
         doc_type = meta.get('doc_type', 'document')
-        orig = Path(original_path)
+        orig = self._resolve_original_path(original_path)
 
-        if not orig.exists():
+        if orig is None:
             click.secho(f"  > Source file no longer exists: {original_path}", fg="red")
             return False
 
