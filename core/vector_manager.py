@@ -525,6 +525,142 @@ class VectorManager:
 
         return True, {"original_name": original_filename, "summary": summary}
 
+    # ── Update scanning ────────────────────────────────────────────────────
+
+    # File extensions considered when scanning source directories for new files.
+    _SCANNABLE_EXTENSIONS = {'.txt', '.md', '.pdf', '.docx'}
+
+    def scan_for_updates(self) -> dict:
+        """Scan source paths and their parent directories for changes.
+
+        Returns a dict with three lists:
+          changed  – (original_path_str, corpus_key, meta, new_hash)
+                     Files still on disk whose content hash differs from stored.
+          new      – original_path_str
+                     Files found in source directories not yet in the corpus.
+          missing  – (original_path_str, corpus_key, meta)
+                     Corpus entries whose source file no longer exists on disk.
+        """
+        metadata = self._load_metadata()
+        if not metadata:
+            return {'changed': [], 'new': [], 'missing': []}
+
+        # Build lookup: original_path -> (corpus_key, meta)
+        known_paths: dict = {}
+        source_dirs: set = set()
+        for corpus_key, meta in metadata.items():
+            orig = meta.get('original_path')
+            if orig:
+                known_paths[orig] = (corpus_key, meta)
+                source_dirs.add(str(Path(orig).parent))
+
+        changed = []
+        missing = []
+
+        for orig_str, (corpus_key, meta) in known_paths.items():
+            orig = Path(orig_str)
+            if not orig.exists():
+                missing.append((orig_str, corpus_key, meta))
+            else:
+                current_hash = get_file_hash(orig)
+                if current_hash != meta.get('hash'):
+                    changed.append((orig_str, corpus_key, meta, current_hash))
+
+        # Scan source directories for files not yet in the corpus
+        new = []
+        for dir_str in source_dirs:
+            src_dir = Path(dir_str)
+            if not src_dir.is_dir():
+                continue
+            for file_path in src_dir.iterdir():
+                if not file_path.is_file():
+                    continue
+                if file_path.suffix.lower() not in self._SCANNABLE_EXTENSIONS:
+                    continue
+                if str(file_path) not in known_paths:
+                    new.append(str(file_path))
+
+        return {'changed': changed, 'new': new, 'missing': missing}
+
+    def reingest_changed_file(self, corpus_key: str, meta: dict) -> bool:
+        """Re-ingest a corpus file whose source has changed on disk.
+
+        Removes old chunks, text cache, and corpus binary; re-copies from
+        the original source path; runs through the full pipeline; updates
+        metadata with the new hash and provenance history.
+
+        Returns True on success, False if the source file is missing.
+        """
+        original_path = meta.get('original_path')
+        doc_type = meta.get('doc_type', 'document')
+        orig = Path(original_path)
+
+        if not orig.exists():
+            click.secho(f"  > Source file no longer exists: {original_path}", fg="red")
+            return False
+
+        new_hash = get_file_hash(orig)
+
+        # Remove old vector chunks
+        old_chunk_ids = self.collection.get(
+            where={"file_path": corpus_key}, include=[]
+        ).get('ids', [])
+        if old_chunk_ids:
+            self.collection.delete(ids=old_chunk_ids)
+
+        # Remove old text cache and corpus binary
+        self._delete_text_cache(meta.get('text_cache_path'))
+        if Path(corpus_key).exists():
+            Path(corpus_key).unlink()
+
+        # Preserve version history
+        history_entry = {
+            'replaced_at': datetime.now(timezone.utc).isoformat(),
+            'old_hash': meta.get('hash'),
+            'old_original_path': original_path,
+            'old_text_cache_path': meta.get('text_cache_path'),
+        }
+        inherited_history = [history_entry] + meta.get('version_history', [])
+
+        # Copy updated file into corpus store
+        file_id = str(uuid.uuid4())
+        destination_path = Path(self.corpus_path) / f"{file_id}{orig.suffix}"
+        shutil.copy(orig, destination_path)
+
+        # Extract text and write cache
+        documents = read_files([str(destination_path)])
+        plain_text = "\n\n".join(doc.get_content() for doc in documents) if documents else ""
+        cache_path = self._write_text_cache(file_id, plain_text)
+
+        # Write new metadata entry (keyed by new destination path)
+        all_metadata = self._load_metadata()
+        del all_metadata[corpus_key]
+        new_entry = {
+            'original_path': original_path,
+            'doc_type': doc_type,
+            'hash': new_hash,
+            'added_at': meta.get('added_at'),
+            'ingested_at': None,
+            'pipeline': meta.get('pipeline', 'cogarc'),
+            'chunk_count': 0,
+            'text_cache_path': cache_path,
+            'version_history': inherited_history,
+        }
+        all_metadata[str(destination_path)] = new_entry
+        self._save_metadata(all_metadata)
+
+        # Run through ingestion pipeline
+        nodes = self._process_and_ingest_file(str(destination_path), doc_type, documents=documents)
+
+        # Update post-ingest fields
+        all_metadata = self._load_metadata()
+        if str(destination_path) in all_metadata:
+            all_metadata[str(destination_path)]['ingested_at'] = datetime.now(timezone.utc).isoformat()
+            all_metadata[str(destination_path)]['chunk_count'] = len(nodes)
+            self._save_metadata(all_metadata)
+
+        return True
+
     def query_vector_store(self, query_text):
         click.echo(f"Querying project '{self.project_name}' for: '{query_text}'")
         query_engine = self.index.as_query_engine()

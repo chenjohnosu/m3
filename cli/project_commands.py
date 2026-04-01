@@ -148,7 +148,7 @@ def dialogue(ctx, project_name):
     #    If the project was loaded but AnalyzeManager failed (e.g. no DB), we can't chat.
     if not ctx.obj.analyze_manager:
         click.secho("Error: AnalyzeManager is not initialized.", fg="red")
-        click.secho("  > Try running '/corpus ingest' to build the vector store first.", fg="yellow")
+        click.secho("  > Try running '/index build' to build the search index first.", fg="yellow")
         return
 
     # 5. Start the Chat Loop

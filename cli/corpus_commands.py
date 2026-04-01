@@ -56,13 +56,17 @@ def corpus():
               type=click.Choice(get_config().get('ingestion_config', {}).get('known_doc_types', ['document'])),
               default=None,
               help='The type of document being added.')
+@click.option('--ingest', 'auto_ingest', is_flag=True, default=False,
+              help='Automatically build the search index after adding.')
 @click.pass_context
-def add(ctx, paths, doc_type):
+def add(ctx, paths, doc_type, auto_ingest):
     """Adds one or more files, directories, or glob patterns to the corpus.
 
     Supports wildcards: /c add "data/*.docx" --type interview
     Recursive globs:    /c add "data/**/*.txt"
     Mixed inputs:       /c add file.pdf "notes/*.md" some_dir/
+
+    Use --ingest to build the search index immediately after adding.
     """
     if not paths:
         click.echo("Error: No file paths provided.")
@@ -92,7 +96,11 @@ def add(ctx, paths, doc_type):
             return
 
         manager.add_to_corpus(resolved, doc_type)
-        click.secho(f"\n✅ Successfully added and processed {len(resolved)} path(s).", fg="green")
+        click.secho(f"\n✅ Successfully added {len(resolved)} path(s).", fg="green")
+
+        if auto_ingest:
+            click.echo("\n  > Building search index (--ingest)...")
+            manager.rebuild_vector_store()
     except Exception as e:
         click.secho(f"🔥 Error: {e}", fg="red")
 
@@ -156,19 +164,110 @@ def list_files(ctx):
         click.secho(f"🔥 Error: {e}", fg="red")
 
 
-@corpus.command('ingest')
+@corpus.command('update')
+@click.option('--yes', '-y', 'auto_approve', is_flag=True, default=False,
+              help='Automatically approve all updates without prompting.')
+@click.option('--type', 'doc_type', default=None,
+              help='Document type for newly discovered files. Defaults to project default.')
 @click.pass_context
-def ingest(ctx):
-    """Rebuilds the entire vector store from the project's corpus."""
-    try:
-        click.echo("This command will re-process the entire corpus, which can be time-consuming.")
-        click.confirm("Are you sure you want to proceed?", abort=True, default=False)
+def update(ctx, auto_approve, doc_type):
+    """Scan source directories for new and changed files, then re-ingest.
 
+    For each file already in the corpus, checks if the source file has changed
+    (by SHA-256 hash). Also scans the same directories for files not yet added.
+    Lists all pending changes and prompts before acting, unless --yes is given.
+    """
+    try:
         manager = _get_manager(ctx)
         if not manager:
             click.secho("Error: No active project. Please use '/project active <name>'.", fg="red")
             return
 
+        click.echo("Scanning source directories for changes...")
+        report = manager.scan_for_updates()
+
+        changed = report['changed']
+        new     = report['new']
+        missing = report['missing']
+
+        if not changed and not new and not missing:
+            click.secho("  Corpus is up to date. No changes detected.", fg="green")
+            return
+
+        # ── Report missing source files (informational only) ──────────────
+        if missing:
+            click.secho(f"\n  {len(missing)} source file(s) no longer found on disk (corpus entry kept):",
+                        fg="yellow")
+            for orig_str, _, _ in missing:
+                click.echo(f"    [MISSING]  {Path(orig_str).name}")
+                click.echo(f"               {orig_str}")
+
+        # ── Report changed files ───────────────────────────────────────────
+        if changed:
+            click.secho(f"\n  {len(changed)} file(s) with changed content:", fg="cyan")
+            for orig_str, _, meta, new_hash in changed:
+                old_hash = meta.get('hash', 'N/A')
+                click.secho(f"    [CHANGED]  {Path(orig_str).name}", fg="cyan")
+                click.echo(f"               {orig_str}")
+                click.echo(f"               hash  {old_hash[:16]}...  →  {new_hash[:16]}...")
+
+        # ── Report new files ───────────────────────────────────────────────
+        if new:
+            click.secho(f"\n  {len(new)} new file(s) found in source directories:", fg="cyan")
+            for orig_str in new:
+                click.secho(f"    [NEW]      {Path(orig_str).name}", fg="cyan")
+                click.echo(f"               {orig_str}")
+
+        if not changed and not new:
+            # Only missing — nothing actionable beyond informing the user
+            return
+
+        # ── Confirm ────────────────────────────────────────────────────────
+        total = len(changed) + len(new)
+        click.echo(f"\n{total} file(s) will be re-ingested.")
+
+        if not auto_approve:
+            try:
+                click.confirm("Proceed?", abort=True, default=False)
+            except click.exceptions.Abort:
+                click.echo("Update cancelled.")
+                return
+
+        # ── Re-ingest changed files ────────────────────────────────────────
+        if changed:
+            click.secho("\n--- Re-ingesting changed files ---", bold=True)
+            for orig_str, corpus_key, meta, _ in changed:
+                click.echo(f"\n  > Updating: {Path(orig_str).name}")
+                manager.reingest_changed_file(corpus_key, meta)
+
+        # ── Add new files ──────────────────────────────────────────────────
+        if new:
+            config = get_config()
+            effective_type = doc_type or config.get('ingestion_config', {}).get('default_doc_type', 'document')
+            click.secho(f"\n--- Adding new files (type: {effective_type}) ---", bold=True)
+            manager.add_to_corpus(new, effective_type)
+
+        click.secho("\n✅ Corpus update complete.", fg="green")
+
+    except Exception as e:
+        click.secho(f"🔥 Error: {e}", fg="red")
+
+
+@corpus.command('ingest', hidden=True)
+@click.pass_context
+def ingest(ctx):
+    """DEPRECATED. Use 'index build'."""
+    click.secho(
+        "  Warning: 'corpus ingest' is deprecated. Use 'index build' instead.",
+        fg="yellow", err=True
+    )
+    try:
+        click.echo("This will re-process the entire corpus, which can be time-consuming.")
+        click.confirm("Are you sure you want to proceed?", abort=True, default=False)
+        manager = _get_manager(ctx)
+        if not manager:
+            click.secho("Error: No active project. Please use '/project active <name>'.", fg="red")
+            return
         manager.rebuild_vector_store()
     except click.exceptions.Abort:
         click.echo("Operation cancelled by user.")
@@ -176,18 +275,26 @@ def ingest(ctx):
         click.secho(f"🔥 Error: {e}", fg="red")
 
 
-@corpus.command('rebuild')
+@corpus.command('rebuild', hidden=True)
 @click.pass_context
 def rebuild(ctx):
-    """Alias for 'ingest'. Rebuilds the entire vector store."""
+    """DEPRECATED. Use 'index build'."""
+    click.secho(
+        "  Warning: 'corpus rebuild' is deprecated. Use 'index build' instead.",
+        fg="yellow", err=True
+    )
     ctx.invoke(ingest)
 
 
-@corpus.command('summary')
+@corpus.command('summary', hidden=True)
 @click.argument('identifier')
 @click.pass_context
 def summary(ctx, identifier):
-    """Displays the holistic summary for a specific file."""
+    """DEPRECATED. Use 'index chunks <identifier> --summary'."""
+    click.secho(
+        "  Warning: 'corpus summary' is deprecated. Use 'index chunks <identifier> --summary' instead.",
+        fg="yellow", err=True
+    )
     try:
         manager = _get_manager(ctx)
         if not manager:
@@ -268,15 +375,15 @@ def provenance(ctx, identifier):
         click.secho(f"🔥 Error: {e}", fg="red")
 
 
-@corpus.command('reconstitute')
+@corpus.command('restore')
 @click.argument('identifier')
 @click.option('--output', 'output_path', default=None, type=click.Path(),
-              help='Write reconstituted text to this file instead of stdout.')
+              help='Write restored text to this file instead of stdout.')
 @click.option('--from-store', is_flag=True, default=False,
-              help='Force reassembly from vector store chunks (ignores text cache).')
+              help='Force reassembly from index chunks (ignores text cache).')
 @click.pass_context
-def reconstitute(ctx, identifier, output_path, from_store):
-    """Reconstitutes plain text for a document from its text cache or vector store."""
+def restore(ctx, identifier, output_path, from_store):
+    """Restores plain text for a document from its text cache or the index."""
     try:
         manager = _get_manager(ctx)
         if not manager:
@@ -291,12 +398,26 @@ def reconstitute(ctx, identifier, output_path, from_store):
         if output_path:
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(content)
-            click.secho(f"✅ Reconstituted text written to: {output_path}", fg="green")
+            click.secho(f"✅ Restored text written to: {output_path}", fg="green")
         else:
             click.echo(content)
 
     except Exception as e:
         click.secho(f"🔥 Error: {e}", fg="red")
+
+
+@corpus.command('reconstitute', hidden=True)
+@click.argument('identifier')
+@click.option('--output', 'output_path', default=None, type=click.Path())
+@click.option('--from-store', is_flag=True, default=False)
+@click.pass_context
+def reconstitute(ctx, identifier, output_path, from_store):
+    """DEPRECATED. Use 'corpus restore'."""
+    click.secho(
+        "  Warning: 'corpus reconstitute' is deprecated. Use 'corpus restore' instead.",
+        fg="yellow", err=True
+    )
+    ctx.invoke(restore, identifier=identifier, output_path=output_path, from_store=from_store)
 
 
 @corpus.command('find-source')

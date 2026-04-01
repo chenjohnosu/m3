@@ -8,7 +8,8 @@ import time
 
 from cli.project_commands import project
 from cli.corpus_commands import corpus
-from cli.vector_commands import vector
+from cli.index_commands import index
+from cli.vector_commands import vector   # kept for backwards-compat (deprecated shim)
 from cli.analyze_commands import analyze
 # Import the new session manager
 from core.session_manager import M3Session
@@ -40,8 +41,8 @@ def show_interactive_help():
     click.echo("Available commands:")
     click.echo("  /project  (alias: /p) - Manage projects")
     click.echo("  /corpus   (alias: /c) - Manage a project's corpus")
-    click.echo("  /vector   (alias: /v) - Manage a project's vector store")
-    click.echo("  /analyze  (alias: /a) - Analyze project data")
+    click.echo("  /index    (alias: /i) - Build and inspect the search index")
+    click.echo("  /analyze  (alias: /a) - Search and analyse project data")
     click.echo("  /help                 - Show this help message")
     click.echo("  /quit     (alias: /q) - Exit interactive mode")
 
@@ -85,7 +86,8 @@ def interactive_mode(session: M3Session):
     command_aliases = {
         'c': 'corpus',
         'p': 'project',
-        'v': 'vector',
+        'i': 'index',
+        'v': 'vector',   # deprecated alias kept for backwards compat
         'q': 'quit',
         'a': 'analyze'
     }
@@ -179,12 +181,12 @@ def batch_mode(filename):
                         click.echo(f"An unexpected error occurred while executing '{command}': {e}", err=True)
 
 
-@cli.command('batch-ingest')
-@click.option('--project', 'project_name', required=True, help='Project name to ingest into.')
+@cli.command('batch-index')
+@click.option('--project', 'project_name', required=True, help='Project name to index into.')
 @click.option('--corpus', 'corpus_path', required=True, type=click.Path(exists=True), help='Path to corpus directory or file.')
 @click.option('--collection', default="m3_collection", help='Target collection name.')
 @click.option('--doc-type', default="document", help='Document type (e.g., document, interview).')
-def batch_ingest(project_name, corpus_path, collection, doc_type):
+def batch_index(project_name, corpus_path, collection, doc_type):
     """Non-interactive pipeline run. Outputs JSON summary to stdout."""
     import json
     from facade import M3System
@@ -203,10 +205,27 @@ def batch_ingest(project_name, corpus_path, collection, doc_type):
         sys.exit(1)
 
 
+@cli.command('batch-ingest', hidden=True)
+@click.option('--project', 'project_name', required=True)
+@click.option('--corpus', 'corpus_path', required=True, type=click.Path(exists=True))
+@click.option('--collection', default="m3_collection")
+@click.option('--doc-type', default="document")
+@click.pass_context
+def batch_ingest(ctx, project_name, corpus_path, collection, doc_type):
+    """DEPRECATED. Use 'batch-index'."""
+    click.secho(
+        "  Warning: 'batch-ingest' is deprecated. Use 'batch-index' instead.",
+        fg="yellow", err=True
+    )
+    ctx.invoke(batch_index, project_name=project_name, corpus_path=corpus_path,
+               collection=collection, doc_type=doc_type)
+
+
 # Add the command groups to the main CLI tool
 cli.add_command(project)
 cli.add_command(corpus)
-cli.add_command(vector)
+cli.add_command(index)
+cli.add_command(vector)   # deprecated shim — hidden but functional
 cli.add_command(analyze)
 
 if __name__ == '__main__':
