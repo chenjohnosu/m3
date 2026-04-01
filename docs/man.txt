@@ -1,271 +1,680 @@
-Here are the drop-in replacements for the help files, updated to include your new `interpret` plugin.
+M3(1)                          m3 Command Reference                         M3(1)
 
------
+NAME
+    m3 - local-first document analysis toolkit for qualitative research
 
-### `cli/analyze_commands.py`
+SYNOPSIS
+    python m3.py [--go | --batch FILE | COMMAND [ARGS...]]
+    python m3.py batch-ingest --project NAME --corpus PATH [OPTIONS]
 
-I've added the new `interpret` command to the "Examples" section of the `run` command's help string.
+DESCRIPTION
+    m3 (monkey3) ingests documents (txt, md, pdf, docx), processes them through
+    a 4-stage LLM pipeline (Stratify -> Structure -> Enrich -> Synthesis),
+    stores embeddings in ChromaDB, and provides semantic search and analysis
+    plugins.
 
-```python
-import click
-from core.analyze_manager import AnalyzeManager
-from utils.config import get_config  # <-- IMPORT ADDED
+    m3 operates in three modes:
 
+    Interactive Mode  (--go)
+        Persistent session with command aliases and history. All commands are
+        prefixed with '/'. Managers are reused across commands for speed.
 
-@click.group()
-def analyze():
-    """Commands for analyzing project data."""
-    pass
+    Single-Command Mode
+        Run one command directly from the shell. Managers are initialised fresh
+        for each invocation.
 
+    Batch Mode  (--batch FILE)
+        Execute a sequence of commands from a text file. Lines beginning with
+        '#' are treated as comments. Errors are reported but do not halt
+        execution.
 
-@analyze.command("topk")
-@click.argument('query_text')
-@click.option('--k', default=3, type=int, help='The number of top chunks to retrieve. Default is 3.')
-@click.option('--summary', 'show_summary', is_flag=True, help='Also show holistic summaries in results.')
-def topk(query_text, k, show_summary):
-    """
-    Finds the Top-K most semantically aligned chunks.
+GLOBAL OPTIONS
+    --go
+        Enter interactive (REPL) mode. Displays a prompt with the active
+        project name. History is saved to ~/.monkey3/history. Tab completion
+        and auto-suggest are available.
 
-    Searches (by default): Chunk Content + Themes
-    (Summary inclusion for search is controlled by 'config.yaml')
+    --batch FILE
+        Execute commands from FILE sequentially. Each line is a command exactly
+        as it would be typed in interactive mode (without the leading '/').
 
-    Example: /analyze topk "connection" --k 5
-    """
-    try:
-        manager = AnalyzeManager(get_config())  # <-- MODIFIED
-        manager.perform_topk_search(query_text, k, show_summary)
-    except Exception as e:
-        click.secho(f"櫨 Error: {e}", fg="red")
+================================================================================
+COMMAND GROUP: project  (/p)
+================================================================================
 
+Interactive alias: /p
 
-@analyze.command("search")
-@click.argument('query_text')
-@click.option('--threshold', default=0.7, type=float,
-              help='The similarity threshold (0.0 to 1.0). Finds all chunks with a score *greater than* this value.')
-@click.option('--summary', 'show_summary', is_flag=True, help='Also show holistic summaries in results.')
-def search(query_text, threshold, show_summary):
-    """
-    (Phase 1) Finds ALL chunks that meet a similarity threshold.
+project create NAME
+    Create a new, empty project. In interactive mode the new project is
+    automatically loaded as the active project.
 
-    Searches (by default): Chunk Content + Themes
-    (Summary inclusion for search is controlled by 'config.yaml')
+    ARGUMENTS
+        NAME    (required) Project name. Used as the directory name under
+                ~/.monkey3/projects/.
 
-    Example: /analyze search "grounded theory" --threshold 0.8
-    """
-    try:
-        manager = AnalyzeManager(get_config())  # <-- MODIFIED
-        manager.perform_threshold_search(query_text, threshold, show_summary)
-    except Exception as e:
-        click.secho(f"櫨 Error: {e}", fg="red")
+    EXAMPLE
+        python m3.py project create my_study
+        /p create my_study
 
+--------------------------------------------------------------------------------
 
-@analyze.command("exact")
-@click.argument('query_text')
-@click.option('--summary', 'include_summary', is_flag=True, help='Also search in and display holistic summaries.')
-def exact(query_text, include_summary):
-    """
-    Finds all chunks with an *exact string match* (case-sensitive).
+project list
+    List all available projects. The currently active project is marked with
+    an asterisk (*) and highlighted.
 
-    Searches (by default): Chunk Content + Themes
-    Use --summary to search in summaries as well.
+    EXAMPLE
+        python m3.py project list
+        /p list
 
-    Example: /analyze exact "professors" --summary
-    """
-    try:
-        manager = AnalyzeManager(get_config())  # <-- MODIFIED
-        # This flag controls both search and display
-        manager.perform_exact_search(query_text, include_summary)
-    except Exception as e:
-        click.secho(f"櫨 Error: {e}", fg="red")
+--------------------------------------------------------------------------------
 
+project active NAME
+    Set the active project for the current session. In interactive mode this
+    re-initialises VectorManager and AnalyzeManager for the new project.
 
-# --- PLUGIN COMMANDS ---
+    ARGUMENTS
+        NAME    (required) Name of an existing project to activate.
 
-@analyze.command("tools")
-def tools():
-    """Lists all available Phase 2 analysis plugins."""
-    try:
-        manager = AnalyzeManager(get_config())  # <-- MODIFIED
-        manager.list_plugins()
-    except Exception as e:
-        click.secho(f"櫨 Error: {e}", fg="red")
+    EXAMPLE
+        /p active my_study
 
+--------------------------------------------------------------------------------
 
-@analyze.command("run")
-@click.argument('plugin_name')
-@click.argument('query_text', required=False)
-@click.option('--k', default=5, type=int,
-              help='Number of items (e.g., clusters, outliers, or top chunks for LLM).')
-@click.option('--threshold', default=0.7, type=float,
-              help='Similarity threshold for LLM plugins (0.0 to 1.0).')
-@click.option('--options', help='Comma-separated options for plugins (e.g., categories).')
-# --- NEW: Add the --save flag ---
-@click.option('--save', is_flag=True, default=False, help="Persist analysis results back to metadata (if supported).")
-# ---------------------------------
-def run(plugin_name, query_text, k, threshold, options, save):  # <-- MODIFIED: Added 'save'
-    """
-    Runs a specific analysis plugin.
+project remove NAME
+    Permanently delete a project and all its data (corpus files, vector store,
+    metadata). Prompts for confirmation before proceeding. If the deleted
+    project was active, the session is unloaded.
 
-    Examples:
+    ARGUMENTS
+        NAME    (required) Name of the project to delete.
 
-    /a run clustering --k 3
+    EXAMPLE
+        /p remove old_project
 
-    /a run clustering --k 3 --save
+--------------------------------------------------------------------------------
 
-    /a run summarize "user connection" --k 5 --threshold 0.75
+project dialogue [NAME]
+    Start an interactive RAG chat session against the active project's vector
+    store. Maintains conversation history for the duration of the session.
+    Type 'exit', 'quit', or 'bye' to leave dialogue mode.
 
-    /a run entity "safety concerns" --options="People,Locations"
+    Requires: interactive mode (--go) and an initialised vector store.
+    If NAME is given and differs from the active project, that project is
+    loaded first.
 
-    /a run interpret
-    """
-    try:
-        manager = AnalyzeManager(get_config())  # <-- MODIFIED
-        # Pass all args as keyword arguments
-        manager.run_plugin(
-            plugin_name,
-            query_text=query_text,
-            k=k,
-            threshold=threshold,
-            options=options,
-            save=save  # <-- MODIFIED: Pass the 'save' flag
-        )
-    except Exception as e:
-        click.secho(f"櫨 Error: {e}", fg="red")
+    ARGUMENTS
+        NAME    (optional) Project to chat with. Defaults to active project.
 
-```
+    EXAMPLE
+        /p dialogue
+        /p dialogue my_study
 
------
+================================================================================
+COMMAND GROUP: corpus  (/c)
+================================================================================
 
-### `man.txt`
+Interactive alias: /c
 
-I've added the new `interpret` plugin to the `analyze` command section.
+corpus add PATHS... [--type TYPE]
+    Add one or more files, directories, or glob patterns to the corpus.
+    Glob patterns must be quoted to prevent shell expansion.
+    Files are registered in corpus_metadata.json; the vector store is NOT
+    rebuilt automatically -- run 'corpus ingest' afterward.
 
-```
-M3(1)
-           User Manuals                            M3(1)NAMEm3 - a local-first document analysis toolkitSYNOPSISm3 [OPTIONS] COMMAND [ARGS]...   m3 --go
+    ARGUMENTS
+        PATHS   (required, variadic) One or more of:
+                  - File path:       /data/interview.docx
+                  - Directory:       /data/transcripts/
+                  - Glob pattern:    "data/*.txt"
+                  - Recursive glob:  "data/**/*.md"
+                  - Mixed:           file.pdf "notes/*.md" some_dir/
 
-   m3 --batch <FILENAME>
-DESCRIPTIONm3 (monkey3) is a command-line tool designed for managing andpreparing collections of text documents for semantic analysis.
-Itprovides a project-based workflow to ingest documents in variousformats (.txt, .pdf, .docx), track their versions, and convert theircontent into a searchable vector store using local, self-hostedembedding
-models.MODES OF OPERATIONCommand-line modeExecute a single command and exit.
-This is the default mode.
-Interactive mode (--go)
-          Enter a read-eval-print loop (REPL) for executing multiple
-          commands in a session.
-In this mode, all commands must be
-          preceded by a forward slash (/).
-For example: /project list.
+    OPTIONS
+        --type TYPE
+            Document type as defined in config.yaml (ingestion_config.
+            known_doc_types). Defaults to ingestion_config.default_doc_type
+            (typically 'document').
 
-   Batch mode (--batch <FILENAME>)
-          Execute a sequence of m3 commands from a specified text file.
-Blank lines and lines beginning with # are ignored.
-COMMANDSThe following commands are available:   project
-          Commands for managing projects.
-create <PROJECT_NAME>
-                 Creates a new, empty project with a corpus and a vector
-                 store.
-list
-                 Lists all available projects.
-An (active) marker
-                 indicates the current project.
-active <PROJECT_NAME>
-                 Sets the active project for the current session.
-remove <PROJECT_NAME>
-                 Permanently deletes a project and all its associated
-                 data, including the corpus and vector store.
-dialogue <PROJECT_NAME>
-                 (Placeholder) Starts an interactive dialogue session
-                 with the project's data.
-corpus
-          Commands for managing the active project's corpus.
-add <PATH>[ <PATH>]...
-                 Adds one or more files to the active project's corpus.
-The path can be a single file, a directory (all files
-                 within will be added recursively), or a wildcard pattern
-                 (e.g., "data/*.txt").
-remove <FILENAME>
-                 Removes a file from the active project's corpus and its
-                 corresponding entries from the vector store.
-list
-                 Lists all files in the active project's corpus,
-                 including their version number and unique ID (UUID).
-ingest
-                 Processes all new or updated files in the corpus,
-                 converts them to text, and stores them as vector
-                 embeddings in the project's vector store.
-vector
-          Commands for managing the active project's vector store.
-status
-                 Displays a detailed status of the vector store, including
-                 its location, the number of indexed text chunks, and the
-                 active embedding model configuration.
-create
-                 Creates a new, blank vector store for the active project.
-If a store already exists, it will be wiped clean.
-This
-                 is useful for resetting a corrupted store or starting an
-                 ingestion from scratch.
-chunks <FILENAME>
-                 Retrieves and displays the text content of all chunks
-                 for a specific file that has been ingested into the
-                 vector store.
-Useful for debugging the text-splitting
-                 process.
-analyze
-          Commands for analyzing project data.
-topk <QUERY> [--k N]
-                 Finds the Top-K most semantically similar chunks.
-search <QUERY> [--threshold N]
-                 Finds all chunks that meet a similarity threshold.
-exact <QUERY_TERM>
-                 Finds all chunks with an exact string match.
-tools
-                 Lists all available analysis plugins.
-run <PLUGIN_NAME>
-                 Runs a specific analysis plugin.
-run interpret
-                 Synthesizes all document summaries into a meta-summary.
+            Common values: document, interview
+
+    EXAMPLES
+        /c add report.pdf
+        /c add "transcripts/*.docx" --type interview
+        /c add "data/**/*.txt" notes/ report.pdf
+
+--------------------------------------------------------------------------------
+
+corpus remove IDENTIFIER
+    Remove a file from the corpus by its original filename or corpus ID.
+    Does not automatically rebuild the vector store.
+
+    ARGUMENTS
+        IDENTIFIER  (required) Original filename or SHA-based corpus ID.
+
+    EXAMPLE
+        /c remove interview_01.docx
+
+--------------------------------------------------------------------------------
+
+corpus list
+    List all files registered in the active project's corpus.
+
+    OUTPUT COLUMNS
+        ID            38-character corpus ID (SHA-256 prefix)
+        Chunks        Number of vector store chunks for this file
+        Document Type Document type (document, interview, etc.)
+        Original File Original filename
+
+    EXAMPLE
+        /c list
+
+--------------------------------------------------------------------------------
+
+corpus ingest
+    Rebuild the entire vector store from the current corpus by running all
+    files through the 4-stage Cognitive Architect pipeline. Prompts for
+    confirmation before starting (this can be time-consuming).
+
+    Alias: corpus rebuild
+
+    EXAMPLE
+        /c ingest
+
+--------------------------------------------------------------------------------
+
+corpus rebuild
+    Alias for 'corpus ingest'. Rebuilds the entire vector store.
+
+    EXAMPLE
+        /c rebuild
+
+--------------------------------------------------------------------------------
+
+corpus summary IDENTIFIER
+    Display the holistic summary generated during Stage 3 of the ingestion
+    pipeline for a specific document.
+
+    ARGUMENTS
+        IDENTIFIER  (required) Original filename or corpus ID.
+
+    EXAMPLE
+        /c summary interview_01.docx
+
+--------------------------------------------------------------------------------
+
+corpus provenance IDENTIFIER
+    Show the full provenance record and version history for a document,
+    including all tracking metadata recorded during ingestion.
+
+    ARGUMENTS
+        IDENTIFIER  (required) Original filename or corpus ID.
+
+    OUTPUT FIELDS
+        Corpus ID         Internal SHA-based identifier
+        Original Path     Absolute path at time of add
+        Doc Type          Document type used during ingestion
+        Hash (SHA-256)    Content hash for change detection
+        Added At          Timestamp of corpus add
+        Ingested At       Timestamp of last vector store build
+        Pipeline          Pipeline variant used (e.g., cogarc)
+        Chunk Count       Number of chunks in the vector store
+        Text Cache        Path to cached plain-text copy
+        Version History   Prior versions if the file was replaced
+
+    EXAMPLE
+        /c provenance interview_01.docx
+
+--------------------------------------------------------------------------------
+
+corpus reconstitute IDENTIFIER [--output PATH] [--from-store]
+    Reconstruct the plain text of a document from its text cache (fast) or
+    by reassembling chunks from the vector store (slower, more complete).
+
+    ARGUMENTS
+        IDENTIFIER  (required) Original filename or corpus ID.
+
+    OPTIONS
+        --output PATH
+            Write the reconstituted text to PATH instead of printing to
+            stdout.
+
+        --from-store
+            Force reassembly from vector store chunks, ignoring the text
+            cache. Useful if the cache is missing or stale.
+
+    EXAMPLES
+        /c reconstitute interview_01.docx
+        /c reconstitute interview_01.docx --output recovered.txt
+        /c reconstitute interview_01.docx --from-store
+
+--------------------------------------------------------------------------------
+
+corpus find-source CHUNK_ID
+    Look up the source document for a given vector store chunk ID. Useful
+    when a search result chunk needs to be traced back to its origin.
+
+    ARGUMENTS
+        CHUNK_ID    (required) Vector store chunk UUID.
+
+    OUTPUT FIELDS
+        Source Document   Original filename
+        Corpus ID         Internal corpus identifier
+        Chunk Position    e.g., "3/12" (chunk 3 of 12 for that document)
+        Doc Type          Document type
+        Ingested At       Timestamp of ingestion
+        Original Path     Absolute source path
+        Text Cache        Path to plain-text cache
+
+    EXAMPLE
+        /c find-source a1b2c3d4-...
+
+================================================================================
+COMMAND GROUP: vector  (/v)
+================================================================================
+
+Interactive alias: /v
+
+vector ingest
+    (Re)build the entire vector store from all files in the corpus. Runs the
+    full 4-stage Cognitive Architect pipeline. Prompts for confirmation.
+
+    EXAMPLE
+        /v ingest
+
+--------------------------------------------------------------------------------
+
+vector status
+    Display the status of the active project's vector store: collection name,
+    total chunks, and a per-document breakdown.
+
+    EXAMPLE
+        /v status
+
+--------------------------------------------------------------------------------
+
+vector chunks IDENTIFIER [--meta] [--pretty] [--summary]
+    Display all text chunks stored in the vector store for a specific file.
+
+    ARGUMENTS
+        IDENTIFIER  (required) Original filename or corpus ID.
+
+    OPTIONS
+        --meta
+            Show abbreviated metadata (themes, doc type) for each chunk.
+
+        --pretty
+            Pretty-print the full metadata dict and content for every chunk.
+            Implies --meta.
+
+        --summary
+            Also display the holistic summary stored for the document.
+
+    EXAMPLES
+        /v chunks interview_01.docx
+        /v chunks interview_01.docx --meta
+        /v chunks interview_01.docx --pretty --summary
+
+--------------------------------------------------------------------------------
+
+vector query QUERY...
+    Perform a simple semantic query against the vector store and print the
+    top matching chunks. Useful for quick ad-hoc lookups.
+
+    ARGUMENTS
+        QUERY   (required, variadic) Query text (space-separated tokens are
+                joined into a single query string).
+
+    EXAMPLE
+        /v query what are the main barriers to adoption
+
+--------------------------------------------------------------------------------
+
+vector create
+    Create a new, blank vector store for the project, deleting any existing
+    one. Prompts for confirmation. Does not ingest any documents.
+
+    EXAMPLE
+        /v create
+
+--------------------------------------------------------------------------------
+
+vector rebuild
+    DEPRECATED. Alias for 'vector ingest'. Kept for backwards compatibility.
+
+    EXAMPLE
+        /v rebuild
+
+================================================================================
+COMMAND GROUP: analyze  (/a)
+================================================================================
+
+Interactive alias: /a
+
+analyze topk QUERY [--k INT] [--summary]
+    Semantic search that returns the K chunks most similar to QUERY. Results
+    are ranked by similarity score (highest first).
+
+    ARGUMENTS
+        QUERY   (required) Search query string.
+
+    OPTIONS
+        --k INT         (default: 3)
+            Number of top chunks to return.
+
+        --summary
+            Also display the holistic document summary for each result's
+            source file.
+
+    EXAMPLES
+        /a topk "barriers to adoption"
+        /a topk "barriers to adoption" --k 10 --summary
+
+--------------------------------------------------------------------------------
+
+analyze search QUERY [--threshold FLOAT] [--summary]
+    Semantic search that returns ALL chunks whose similarity score exceeds
+    THRESHOLD. Unlike topk, this is not capped -- it returns every match
+    above the cutoff.
+
+    ARGUMENTS
+        QUERY   (required) Search query string.
+
+    OPTIONS
+        --threshold FLOAT   (default: 0.7, range: 0.0 - 1.0)
+            Minimum similarity score. Only chunks with score > THRESHOLD
+            are returned.
+
+        --summary
+            Also display the holistic summary for each result's source file.
+
+    EXAMPLES
+        /a search "participant challenges"
+        /a search "trust" --threshold 0.8
+        /a search "communication" --threshold 0.6 --summary
+
+--------------------------------------------------------------------------------
+
+analyze exact QUERY [--summary]
+    Exact string search across all chunk content (case-sensitive). Returns
+    every chunk whose text contains QUERY verbatim.
+
+    ARGUMENTS
+        QUERY   (required) Exact string to match.
+
+    OPTIONS
+        --summary
+            Also search holistic summaries and include them in results.
+
+    EXAMPLES
+        /a exact "informed consent"
+        /a exact "COVID-19" --summary
+
+--------------------------------------------------------------------------------
+
+analyze tools
+    List all available Phase 2 analysis plugins with their keys and
+    descriptions. Use plugin keys with 'analyze run'.
+
+    EXAMPLE
+        /a tools
+
+--------------------------------------------------------------------------------
+
+analyze run PLUGIN [QUERY] [--k INT] [--threshold FLOAT] [--options STRING] [--save]
+    Run a named analysis plugin. The plugin performs deep analysis using the
+    LLM and/or statistical methods depending on its type.
+
+    ARGUMENTS
+        PLUGIN  (required) Plugin key (see PLUGINS section below).
+        QUERY   (optional) Query text. Required by LLM-based plugins;
+                optional or unused by statistical plugins.
+
+    OPTIONS
+        --k INT             (default: 5)
+            Maximum number of items: clusters for 'clustering', outliers for
+            'anomaly', or top chunks sent to the LLM for other plugins.
+
+        --threshold FLOAT   (default: 0.7, range: 0.0 - 1.0)
+            Similarity threshold for retrieval in LLM plugins. Chunks with
+            score <= THRESHOLD are excluded from the LLM context.
+
+        --options STRING
+            Comma-separated plugin-specific options. Used by 'categorize'
+            and 'entity' to specify categories or entity types.
+            Example: --options "people,places,organisations"
+
+        --save
+            Persist analysis results back to chunk metadata in the vector
+            store. Currently supported by 'clustering' (saves axial_theme).
+
+    EXAMPLES
+        /a run interpret
+        /a run clustering --k 6 --save
+        /a run anomaly --k 3
+        /a run entity "barriers" --options "people,concepts,barriers"
+        /a run sentiment "patient experience" --threshold 0.65 --k 8
+        /a run categorize "funding" --options "policy,finance,governance"
+        /a run summarize "key findings" --k 10
+        /a run visualize
+
+================================================================================
+PLUGINS  (used with: analyze run PLUGIN)
+================================================================================
+
+    KEY          QUERY     DESCRIPTION
+    ------------ --------- ---------------------------------------------------
+    interpret    No        Synthesises all holistic document summaries into a
+                           single meta-summary using the LLM. Good for a
+                           project-wide overview without a specific query.
+
+    clustering   No        Hierarchical Agglomerative Clustering on all chunk
+                           embeddings, then LLM Axial Coding to synthesise
+                           each cluster's themes into an abstract core theme.
+                           --k sets cluster count; --save writes axial_theme
+                           back to chunk metadata.
+                           Requires: scikit-learn
+
+    anomaly      No        IsolationForest on all chunk embeddings to find the
+                           most semantically isolated (outlier) chunks.
+                           --k controls how many outliers are reported.
+                           Requires: scikit-learn
+
+    visualize    No        Reduces all chunk embeddings to 2D via t-SNE and
+                           saves a scatter plot coloured by theme to the
+                           project directory.
+                           Requires: scikit-learn, matplotlib, pandas, seaborn
+
+    entity       Yes       Extracts named entities from retrieved context
+                           chunks. Specify entity types with --options
+                           (e.g., "people,places,organisations").
+
+    categorize   Yes       Assigns retrieved chunks to user-defined categories.
+                           Provide category names with --options
+                           (e.g., "policy,finance,governance").
+
+    sentiment    Yes       Performs sentiment analysis on retrieved context
+                           chunks. Returns per-chunk labels and an overall
+                           summary.
+
+    summarize    Yes       Produces a prose synthesis of the chunks most
+                           relevant to QUERY. Similar to topk but returns an
+                           LLM-generated narrative rather than raw chunks.
+
+================================================================================
+TOP-LEVEL COMMAND: batch-ingest
+================================================================================
+
+python m3.py batch-ingest --project NAME --corpus PATH [OPTIONS]
+
+    Non-interactive pipeline run for scripting and automation. Outputs a
+    JSON summary to stdout on completion. Suitable for CI pipelines or
+    scheduled jobs.
+
+    OPTIONS
+        --project NAME      (required)
+            Name of an existing project to ingest into.
+
+        --corpus PATH       (required)
+            Path to a corpus directory or a single file. Must exist.
+
+        --collection NAME   (default: m3_collection)
+            Target ChromaDB collection name within the project.
+
+        --doc-type TYPE     (default: document)
+            Document type applied during ingestion (e.g., document,
+            interview).
+
+    OUTPUT  (stdout, JSON)
+        {
+          "documents_processed": <int>,
+          "chunks_stored":       <int>,
+          "collection":          "<collection_name>",
+          "errors":              ["<error_msg>", ...]
+        }
+
+    EXAMPLES
+        python m3.py batch-ingest --project my_study --corpus ./data/
+
+        python m3.py batch-ingest \
+            --project interviews \
+            --corpus ./raw/interviews/ \
+            --doc-type interview \
+            --collection interviews_v1
+
+================================================================================
+INTERACTIVE MODE REFERENCE
+================================================================================
+
+Start interactive mode:
+    python m3.py --go
+
+All commands are entered with a leading '/'. The active project is shown
+in the prompt and in the bottom toolbar.
+
+COMMAND ALIASES
+    /p   project
+    /c   corpus
+    /v   vector
+    /a   analyze
+
+BUILT-IN COMMANDS
+    /help       Show available commands and aliases.
+    /quit       Exit interactive mode.
+    /q          Alias for /quit.
+
+FEATURES
+    - Command history stored at ~/.monkey3/history
+    - Tab completion for commands and subcommands
+    - Auto-suggest from history (grey ghost text)
+    - Bottom toolbar displays active project name
+
+BATCH FILE FORMAT  (--batch FILE)
+    One command per line, without the leading '/'.
+    Lines beginning with '#' are comments and are ignored.
+
+    Example batch file:
+        # Set up a new project
+        project create pilot_study
+        corpus add "data/interviews/*.docx" --type interview
+        corpus ingest
+        analyze run clustering --k 5 --save
+
+================================================================================
+DATA STORAGE
+================================================================================
+
+    ~/.monkey3/
+    |-- config.yaml                   Global configuration
+    |-- history                       Interactive mode command history
+    `-- projects/
+        `-- <project_name>/
+            |-- corpus/               Plain-text copies of ingested documents
+            |-- chroma_db/            ChromaDB persistent vector store
+            `-- corpus_metadata.json  Per-document tracking and provenance
+
+================================================================================
+INGESTION PIPELINE STAGES
+================================================================================
+
+    Stage 0  Stratify
+        Interview-specific. Splits Q&A exchanges into discrete turns using
+        the LLM (stratify_model). Skipped for non-interview document types.
+
+    Stage 1  Structure
+        Thematic Scaffolding. Extracts 2-4 thematic codes per chunk using
+        the LLM (structure_model). Stored as 'themes' metadata.
+
+    Stage 2  Enrich
+        Chunk Splitting + Hypothetical Question Generation. Splits documents
+        into smaller overlapping chunks and generates a representative
+        question for each chunk using the LLM (enrichment_model). Stored as
+        'hypothetical_question' metadata.
+
+    Stage 3  Synthesis
+        Holistic Summary. Generates a document-level narrative summary from
+        all chunks using the LLM (synthesis_model). Retrievable via
+        'corpus summary' and used by the 'interpret' plugin.
+
+================================================================================
 CONFIGURATION
-    The main configuration is stored in ~/.monkey3/config.yaml.
-This file
-    controls the embedding models and other settings.
-embedding_profiles
-    Defines one or more profiles for the ingestion process.
-Each
-    profile specifies the embed_model (from Hugging Face), the
-   chunk_size, and the chunk_overlap.
-active_profile
-          Specifies which of the embedding_profiles to use when running
-          the /corpus ingest command.
-FILES
-    ~/.monkey3/The base directory for all m3 data and configuration.
-~/.monkey3/config.yaml
-          The global configuration file.
-~/.monkey3/projects/<PROJECT_NAME>/
-          The directory for a specific project.
-~/.monkey3/projects/<PROJECT_NAME>/corpus/
-          Contains the original documents and the manifest.
-~/.monkey3/projects/<PROJECT_NAME>/corpus/corpus_manifest.json
-          A JSON file that tracks every file in the corpus, including
-          its version, content hash, and unique ID.
-~/.monkey3/projects/<PROJECT_NAME>/vector_store/
-          Contains the ChromaDB persistent vector store.
-EXAMPLES
-A typical workflow:   # Create and activate a new project
-   $ m3 project create my_research
-   $ m3 project active my_research
+================================================================================
 
-   # Add all text files from a local directory
-   $ m3 corpus add "path/to/notes/*.txt"
+    Config file: ~/.monkey3/config.yaml
 
-   # Ingest the files into the vector store
-   $ m3 corpus ingest
+    Key settings:
 
-   # Check the status
-   $ m3 vector status
+    ingestion_config.known_doc_types
+        List of valid document type strings for --type.
+        Default: [document]
 
-   # Inspect the chunks for a specific file
-   $ m3 vector chunks my_document.txt
-M3(1)            
-                October 2025                            M3(1)
-```
+    ingestion_config.default_doc_type
+        Fallback type when --type is omitted.
+        Default: document
+
+    ingestion_config.cogarc_settings
+        Maps pipeline stages to model keys:
+          stage_0_model  ->  stratify_model
+          stage_1_model  ->  structure_model
+          stage_2_model  ->  enrichment_model
+          stage_3_model  ->  synthesis_model
+
+    llm_providers
+        Defines Ollama endpoints and model names for each model key.
+        Default base URL: http://localhost:11435
+
+================================================================================
+QUICK-START WORKFLOW
+================================================================================
+
+    1. Start m3 in interactive mode:
+           python m3.py --go
+
+    2. Create a project:
+           /p create my_study
+
+    3. Add documents:
+           /c add "data/interviews/*.docx" --type interview
+           /c add report.pdf
+
+    4. Build the vector store (runs all 4 pipeline stages):
+           /c ingest
+
+    5. Search and explore:
+           /a topk "main findings" --k 5
+           /a search "barriers" --threshold 0.75
+           /a exact "informed consent"
+
+    6. Run analysis plugins:
+           /a run clustering --k 5 --save
+           /a run interpret
+           /a run anomaly --k 3
+
+    7. Start a dialogue session:
+           /p dialogue
+
+    8. Exit:
+           /q
+
+================================================================================
+
+m3 v0.28+                                                    m3 Command Reference
