@@ -5,7 +5,8 @@ NAME
 
 SYNOPSIS
     python m3.py [--go | --batch FILE | COMMAND [ARGS...]]
-    python m3.py batch-ingest --project NAME --corpus PATH [OPTIONS]
+    python m3.py batch-index  --project NAME --corpus PATH [OPTIONS]
+    python m3.py batch-ingest --project NAME --corpus PATH [OPTIONS]  (deprecated)
 
 DESCRIPTION
     m3 (monkey3) ingests documents (txt, md, pdf, docx), processes them through
@@ -115,11 +116,11 @@ COMMAND GROUP: corpus  (/c)
 
 Interactive alias: /c
 
-corpus add PATHS... [--type TYPE]
+corpus add PATHS... [--type TYPE] [--ingest]
     Add one or more files, directories, or glob patterns to the corpus.
     Glob patterns must be quoted to prevent shell expansion.
-    Files are registered in corpus_metadata.json; the vector store is NOT
-    rebuilt automatically -- run 'corpus ingest' afterward.
+    Files are registered in corpus_metadata.json. Without --ingest the
+    vector store is NOT rebuilt automatically -- run 'index build' afterward.
 
     ARGUMENTS
         PATHS   (required, variadic) One or more of:
@@ -137,10 +138,16 @@ corpus add PATHS... [--type TYPE]
 
             Common values: document, interview
 
+        --ingest
+            After adding all files to the corpus, immediately run the full
+            4-stage pipeline to build the vector index. Equivalent to
+            'corpus add ...' followed by 'index build'.
+
     EXAMPLES
         /c add report.pdf
         /c add "transcripts/*.docx" --type interview
         /c add "data/**/*.txt" notes/ report.pdf
+        /c add interview_02.docx --type interview --ingest
 
 --------------------------------------------------------------------------------
 
@@ -171,34 +178,32 @@ corpus list
 --------------------------------------------------------------------------------
 
 corpus ingest
-    Rebuild the entire vector store from the current corpus by running all
-    files through the 4-stage Cognitive Architect pipeline. Prompts for
-    confirmation before starting (this can be time-consuming).
-
-    Alias: corpus rebuild
+    DEPRECATED. Use 'index build' instead.
+    Kept as a hidden backwards-compatible alias; emits a deprecation warning.
 
     EXAMPLE
-        /c ingest
+        /c ingest        (deprecated — use: /i build)
 
 --------------------------------------------------------------------------------
 
 corpus rebuild
-    Alias for 'corpus ingest'. Rebuilds the entire vector store.
+    DEPRECATED. Use 'index build' instead.
+    Alias for 'corpus ingest'; also deprecated.
 
     EXAMPLE
-        /c rebuild
+        /c rebuild       (deprecated — use: /i build)
 
 --------------------------------------------------------------------------------
 
 corpus summary IDENTIFIER
-    Display the holistic summary generated during Stage 3 of the ingestion
-    pipeline for a specific document.
+    DEPRECATED. Use 'index chunks IDENTIFIER --summary' instead.
+    Kept as a hidden backwards-compatible alias; emits a deprecation warning.
 
     ARGUMENTS
         IDENTIFIER  (required) Original filename or corpus ID.
 
     EXAMPLE
-        /c summary interview_01.docx
+        /c summary interview_01.docx   (deprecated — use: /i chunks interview_01.docx --summary)
 
 --------------------------------------------------------------------------------
 
@@ -227,25 +232,11 @@ corpus provenance IDENTIFIER
 --------------------------------------------------------------------------------
 
 corpus reconstitute IDENTIFIER [--output PATH] [--from-store]
-    Reconstruct the plain text of a document from its text cache (fast) or
-    by reassembling chunks from the vector store (slower, more complete).
-
-    ARGUMENTS
-        IDENTIFIER  (required) Original filename or corpus ID.
-
-    OPTIONS
-        --output PATH
-            Write the reconstituted text to PATH instead of printing to
-            stdout.
-
-        --from-store
-            Force reassembly from vector store chunks, ignoring the text
-            cache. Useful if the cache is missing or stale.
+    DEPRECATED. Use 'corpus restore' instead.
+    Kept as a hidden backwards-compatible alias; emits a deprecation warning.
 
     EXAMPLES
-        /c reconstitute interview_01.docx
-        /c reconstitute interview_01.docx --output recovered.txt
-        /c reconstitute interview_01.docx --from-store
+        /c reconstitute interview_01.docx   (deprecated — use: /c restore interview_01.docx)
 
 --------------------------------------------------------------------------------
 
@@ -268,11 +259,124 @@ corpus find-source CHUNK_ID
     EXAMPLE
         /c find-source a1b2c3d4-...
 
+--------------------------------------------------------------------------------
+
+corpus restore IDENTIFIER [--output PATH] [--from-store]
+    Reconstruct the plain text of a corpus document. Reads from the fast
+    text cache by default; falls back to reassembling chunks from ChromaDB.
+
+    ARGUMENTS
+        IDENTIFIER  (required) Original filename or corpus ID.
+
+    OPTIONS
+        --output PATH
+            Write the restored text to PATH instead of printing to stdout.
+
+        --from-store
+            Force reassembly from vector store chunks even if a text cache
+            exists. Useful when the cache is missing or stale.
+
+    EXAMPLES
+        /c restore interview_01.docx
+        /c restore interview_01.docx --output recovered.txt
+        /c restore interview_01.docx --from-store
+
+--------------------------------------------------------------------------------
+
+corpus update [--yes]
+    Scan the source directories of all corpus files for changes. Compares
+    current file content hashes against stored hashes and reports:
+
+        [NEW]     Files found in source directories not yet in the corpus.
+        [CHANGED] Files whose content hash differs from the stored hash.
+        [MISSING] Corpus entries whose source file no longer exists on disk.
+
+    After reporting, prompts for confirmation before re-ingesting changed
+    files and adding new ones. Use --yes / -y to skip the prompt.
+
+    Source directories are inferred from the original_path of existing
+    corpus entries. Only files with scannable extensions (.txt, .md, .pdf,
+    .docx) are considered when looking for new files.
+
+    Relative original_path entries (from older corpus versions) are
+    resolved via: (1) path as stored, (2) current working directory,
+    (3) project root parent.
+
+    OPTIONS
+        --yes, -y
+            Skip confirmation prompt and proceed automatically.
+
+    EXAMPLES
+        /c update
+        /c update --yes
+
 ================================================================================
-COMMAND GROUP: vector  (/v)
+COMMAND GROUP: index  (/i)
 ================================================================================
 
-Interactive alias: /v
+Interactive alias: /i
+
+index build [--force]
+    Build (or rebuild) the vector store from all files currently in the
+    corpus. Runs every file through the full 4-stage Cognitive Architect
+    pipeline (Stratify -> Structure -> Enrich -> Synthesis). Prompts for
+    confirmation before starting, as this can be time-consuming.
+
+    OPTIONS
+        --force
+            Force a full rebuild even if the index appears current. (Flag
+            reserved for future incremental-build logic; currently always
+            triggers a full rebuild.)
+
+    EXAMPLES
+        /i build
+        /i build --force
+
+--------------------------------------------------------------------------------
+
+index status
+    Display the current status of the active project's vector store:
+    collection name, distance metric, total indexed chunks, and the model
+    keys configured for each pipeline stage.
+
+    EXAMPLE
+        /i status
+
+--------------------------------------------------------------------------------
+
+index chunks IDENTIFIER [--meta] [--pretty] [--summary]
+    Display all text chunks stored in the vector index for a specific
+    document.
+
+    ARGUMENTS
+        IDENTIFIER  (required) Original filename or corpus ID.
+
+    OPTIONS
+        --meta
+            Show abbreviated metadata (themes, doc type) for each chunk.
+
+        --pretty
+            Pretty-print the full metadata dict and content for every chunk.
+            Implies --meta.
+
+        --summary
+            Also display the holistic document summary stored with the
+            chunks (generated during Stage 3).
+
+    EXAMPLES
+        /i chunks interview_01.docx
+        /i chunks interview_01.docx --meta
+        /i chunks interview_01.docx --pretty --summary
+
+================================================================================
+COMMAND GROUP: vector  (/v)  [DEPRECATED — use 'index' (/i) instead]
+================================================================================
+
+    The 'vector' group is a hidden backwards-compatible shim. Every subcommand
+    emits a deprecation warning and forwards to its 'index' equivalent.
+    Use '/i' (index) for all index management tasks.
+
+Interactive alias: /v  (deprecated — use /i)
 
 vector ingest
     (Re)build the entire vector store from all files in the corpus. Runs the
@@ -350,118 +454,190 @@ COMMAND GROUP: analyze  (/a)
 
 Interactive alias: /a
 
-analyze topk QUERY [--k INT] [--summary]
-    Semantic search that returns the K chunks most similar to QUERY. Results
-    are ranked by similarity score (highest first).
+analyze search QUERY [--k INT] [--threshold FLOAT] [--exact] [--summary]
+    Unified search command. Supports top-K similarity search, threshold-
+    filtered similarity search, and exact string search via flags.
 
     ARGUMENTS
-        QUERY   (required) Search query string.
+        QUERY   (required) Search query or exact string.
 
     OPTIONS
-        --k INT         (default: 3)
-            Number of top chunks to return.
+        --k INT             (default: 3)
+            Return the K chunks most similar to QUERY, ranked by score.
+            Mutually exclusive with --threshold and --exact.
+
+        --threshold FLOAT   (range: 0.0 - 1.0)
+            Return ALL chunks whose similarity score exceeds THRESHOLD.
+            Not capped — every qualifying chunk is returned.
+            Mutually exclusive with --k and --exact.
+
+        --exact
+            Case-sensitive substring match. Returns every chunk whose
+            text contains QUERY verbatim.
+            Mutually exclusive with --k and --threshold.
 
         --summary
             Also display the holistic document summary for each result's
             source file.
 
     EXAMPLES
-        /a topk "barriers to adoption"
-        /a topk "barriers to adoption" --k 10 --summary
-
---------------------------------------------------------------------------------
-
-analyze search QUERY [--threshold FLOAT] [--summary]
-    Semantic search that returns ALL chunks whose similarity score exceeds
-    THRESHOLD. Unlike topk, this is not capped -- it returns every match
-    above the cutoff.
-
-    ARGUMENTS
-        QUERY   (required) Search query string.
-
-    OPTIONS
-        --threshold FLOAT   (default: 0.7, range: 0.0 - 1.0)
-            Minimum similarity score. Only chunks with score > THRESHOLD
-            are returned.
-
-        --summary
-            Also display the holistic summary for each result's source file.
-
-    EXAMPLES
-        /a search "participant challenges"
-        /a search "trust" --threshold 0.8
-        /a search "communication" --threshold 0.6 --summary
-
---------------------------------------------------------------------------------
-
-analyze exact QUERY [--summary]
-    Exact string search across all chunk content (case-sensitive). Returns
-    every chunk whose text contains QUERY verbatim.
-
-    ARGUMENTS
-        QUERY   (required) Exact string to match.
-
-    OPTIONS
-        --summary
-            Also search holistic summaries and include them in results.
-
-    EXAMPLES
-        /a exact "informed consent"
-        /a exact "COVID-19" --summary
+        /a search "barriers to adoption"
+        /a search "barriers to adoption" --k 10 --summary
+        /a search "participant challenges" --threshold 0.75
+        /a search "trust" --threshold 0.8 --summary
+        /a search "informed consent" --exact
+        /a search "COVID-19" --exact --summary
 
 --------------------------------------------------------------------------------
 
 analyze tools
-    List all available Phase 2 analysis plugins with their keys and
-    descriptions. Use plugin keys with 'analyze run'.
+    List all available analysis plugins with their keys and descriptions.
 
     EXAMPLE
         /a tools
 
 --------------------------------------------------------------------------------
 
-analyze run PLUGIN [QUERY] [--k INT] [--threshold FLOAT] [--options STRING] [--save]
-    Run a named analysis plugin. The plugin performs deep analysis using the
-    LLM and/or statistical methods depending on its type.
+analyze clustering [--k INT] [--threshold FLOAT] [--save]
+    Hierarchical Agglomerative Clustering on all chunk embeddings, followed
+    by LLM Axial Coding to synthesise each cluster's themes.
 
-    ARGUMENTS
-        PLUGIN  (required) Plugin key (see PLUGINS section below).
-        QUERY   (optional) Query text. Required by LLM-based plugins;
-                optional or unused by statistical plugins.
+    OPTIONS
+        --k INT             (default: 5)  Number of clusters.
+        --threshold FLOAT   (default: 0.7)  Unused by this plugin.
+        --save              Write axial_theme back to chunk metadata.
+
+    Requires: scikit-learn
+
+    EXAMPLES
+        /a clustering
+        /a clustering --k 6 --save
+
+--------------------------------------------------------------------------------
+
+analyze anomaly [--k INT]
+    IsolationForest outlier detection on chunk embeddings. Reports the K
+    most semantically isolated chunks.
+
+    OPTIONS
+        --k INT   (default: 5)  Number of outliers to report.
+
+    Requires: scikit-learn
+
+    EXAMPLE
+        /a anomaly --k 3
+
+--------------------------------------------------------------------------------
+
+analyze visualize
+    Reduces all chunk embeddings to 2D via t-SNE and saves a scatter plot
+    coloured by theme to the project directory.
+
+    Requires: scikit-learn, matplotlib, pandas, seaborn
+
+    EXAMPLE
+        /a visualize
+
+--------------------------------------------------------------------------------
+
+analyze entity QUERY [--k INT] [--threshold FLOAT] [--options STRING]
+    Extract named entities from chunks retrieved for QUERY.
 
     OPTIONS
         --k INT             (default: 5)
-            Maximum number of items: clusters for 'clustering', outliers for
-            'anomaly', or top chunks sent to the LLM for other plugins.
+        --threshold FLOAT   (default: 0.7)
+        --options STRING    Comma-separated entity types.
+                            Example: --options "people,places,organisations"
 
-        --threshold FLOAT   (default: 0.7, range: 0.0 - 1.0)
-            Similarity threshold for retrieval in LLM plugins. Chunks with
-            score <= THRESHOLD are excluded from the LLM context.
+    EXAMPLE
+        /a entity "barriers" --options "people,concepts,barriers"
 
-        --options STRING
-            Comma-separated plugin-specific options. Used by 'categorize'
-            and 'entity' to specify categories or entity types.
-            Example: --options "people,places,organisations"
+--------------------------------------------------------------------------------
 
-        --save
-            Persist analysis results back to chunk metadata in the vector
-            store. Currently supported by 'clustering' (saves axial_theme).
+analyze categorize QUERY [--k INT] [--threshold FLOAT] [--options STRING]
+    Assign retrieved chunks to user-defined categories.
+
+    OPTIONS
+        --k INT             (default: 5)
+        --threshold FLOAT   (default: 0.7)
+        --options STRING    Comma-separated category names.
+                            Example: --options "policy,finance,governance"
+
+    EXAMPLE
+        /a categorize "funding" --options "policy,finance,governance"
+
+--------------------------------------------------------------------------------
+
+analyze sentiment QUERY [--k INT] [--threshold FLOAT]
+    Sentiment analysis on chunks retrieved for QUERY. Returns per-chunk
+    labels and an overall summary.
+
+    OPTIONS
+        --k INT             (default: 5)
+        --threshold FLOAT   (default: 0.7)
+
+    EXAMPLE
+        /a sentiment "patient experience" --threshold 0.65 --k 8
+
+--------------------------------------------------------------------------------
+
+analyze summarize QUERY [--k INT] [--threshold FLOAT]
+    LLM-generated prose synthesis of the chunks most relevant to QUERY.
+
+    OPTIONS
+        --k INT             (default: 5)
+        --threshold FLOAT   (default: 0.7)
+
+    EXAMPLE
+        /a summarize "key findings" --k 10
+
+--------------------------------------------------------------------------------
+
+analyze interpret [--k INT] [--threshold FLOAT]
+    Synthesises all holistic document summaries into a single meta-summary
+    using the LLM. Good for a project-wide overview without a specific query.
+
+    OPTIONS
+        --k INT             (default: 5)
+        --threshold FLOAT   (default: 0.7)
+
+    EXAMPLE
+        /a interpret
+
+--------------------------------------------------------------------------------
+
+analyze topk QUERY [--k INT] [--summary]
+    DEPRECATED. Use 'analyze search QUERY --k N' instead.
+
+    EXAMPLE
+        /a topk "barriers"    (deprecated — use: /a search "barriers" --k 3)
+
+--------------------------------------------------------------------------------
+
+analyze exact QUERY [--summary]
+    DEPRECATED. Use 'analyze search QUERY --exact' instead.
+
+    EXAMPLE
+        /a exact "consent"    (deprecated — use: /a search "consent" --exact)
+
+--------------------------------------------------------------------------------
+
+analyze run PLUGIN [QUERY] [--k INT] [--threshold FLOAT] [--options STRING] [--save]
+    DEPRECATED. Use the plugin name directly as a subcommand instead.
 
     EXAMPLES
-        /a run interpret
-        /a run clustering --k 6 --save
-        /a run anomaly --k 3
-        /a run entity "barriers" --options "people,concepts,barriers"
-        /a run sentiment "patient experience" --threshold 0.65 --k 8
-        /a run categorize "funding" --options "policy,finance,governance"
-        /a run summarize "key findings" --k 10
-        /a run visualize
+        /a run interpret      (deprecated — use: /a interpret)
+        /a run clustering     (deprecated — use: /a clustering)
+        /a run entity "q"     (deprecated — use: /a entity "q")
 
 ================================================================================
-PLUGINS  (used with: analyze run PLUGIN)
+PLUGINS  (direct subcommands of 'analyze')
 ================================================================================
 
-    KEY          QUERY     DESCRIPTION
+    Each plugin is invoked directly as a subcommand: /a <plugin> [options].
+    'analyze run PLUGIN' is a deprecated alias kept for backwards compatibility.
+
+    SUBCOMMAND   QUERY     DESCRIPTION
     ------------ --------- ---------------------------------------------------
     interpret    No        Synthesises all holistic document summaries into a
                            single meta-summary using the LLM. Good for a
@@ -497,18 +673,19 @@ PLUGINS  (used with: analyze run PLUGIN)
                            summary.
 
     summarize    Yes       Produces a prose synthesis of the chunks most
-                           relevant to QUERY. Similar to topk but returns an
-                           LLM-generated narrative rather than raw chunks.
+                           relevant to QUERY. Returns an LLM-generated
+                           narrative rather than raw chunks.
 
 ================================================================================
-TOP-LEVEL COMMAND: batch-ingest
+TOP-LEVEL COMMAND: batch-index
 ================================================================================
 
-python m3.py batch-ingest --project NAME --corpus PATH [OPTIONS]
+python m3.py batch-index --project NAME --corpus PATH [OPTIONS]
 
-    Non-interactive pipeline run for scripting and automation. Outputs a
-    JSON summary to stdout on completion. Suitable for CI pipelines or
-    scheduled jobs.
+    Non-interactive pipeline run for scripting and automation. Ingests all
+    documents in CORPUS into PROJECT's vector store and outputs a JSON
+    summary to stdout on completion. Suitable for CI pipelines or scheduled
+    jobs.
 
     OPTIONS
         --project NAME      (required)
@@ -533,13 +710,22 @@ python m3.py batch-ingest --project NAME --corpus PATH [OPTIONS]
         }
 
     EXAMPLES
-        python m3.py batch-ingest --project my_study --corpus ./data/
+        python m3.py batch-index --project my_study --corpus ./data/
 
-        python m3.py batch-ingest \
+        python m3.py batch-index \
             --project interviews \
             --corpus ./raw/interviews/ \
             --doc-type interview \
             --collection interviews_v1
+
+================================================================================
+TOP-LEVEL COMMAND: batch-ingest  [DEPRECATED — use batch-index]
+================================================================================
+
+python m3.py batch-ingest --project NAME --corpus PATH [OPTIONS]
+
+    DEPRECATED. Use 'batch-index' instead. Kept as a backwards-compatible
+    alias; emits a deprecation warning but otherwise behaves identically.
 
 ================================================================================
 INTERACTIVE MODE REFERENCE
@@ -554,8 +740,9 @@ in the prompt and in the bottom toolbar.
 COMMAND ALIASES
     /p   project
     /c   corpus
-    /v   vector
+    /i   index
     /a   analyze
+    /v   vector  (deprecated — use /i)
 
 BUILT-IN COMMANDS
     /help       Show available commands and aliases.
@@ -576,8 +763,8 @@ BATCH FILE FORMAT  (--batch FILE)
         # Set up a new project
         project create pilot_study
         corpus add "data/interviews/*.docx" --type interview
-        corpus ingest
-        analyze run clustering --k 5 --save
+        index build
+        analyze clustering --k 5 --save
 
 ================================================================================
 DATA STORAGE
@@ -656,23 +843,29 @@ QUICK-START WORKFLOW
            /c add "data/interviews/*.docx" --type interview
            /c add report.pdf
 
-    4. Build the vector store (runs all 4 pipeline stages):
-           /c ingest
+       Or add and index in one step:
+           /c add "data/interviews/*.docx" --type interview --ingest
+
+    4. Build the vector index (runs all 4 pipeline stages):
+           /i build
 
     5. Search and explore:
-           /a topk "main findings" --k 5
+           /a search "main findings" --k 5
            /a search "barriers" --threshold 0.75
-           /a exact "informed consent"
+           /a search "informed consent" --exact
 
     6. Run analysis plugins:
-           /a run clustering --k 5 --save
-           /a run interpret
-           /a run anomaly --k 3
+           /a clustering --k 5 --save
+           /a interpret
+           /a anomaly --k 3
 
-    7. Start a dialogue session:
+    7. Check for updated source files:
+           /c update
+
+    8. Start a dialogue session:
            /p dialogue
 
-    8. Exit:
+    9. Exit:
            /q
 
 ================================================================================

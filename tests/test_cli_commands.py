@@ -41,6 +41,13 @@ except (ImportError, OSError) as e:
     CLI_IMPORT_ERRORS['vector'] = str(e)
 
 try:
+    from cli.index_commands import index as index_group
+    INDEX_OK = True
+except (ImportError, OSError) as e:
+    INDEX_OK = False
+    CLI_IMPORT_ERRORS['index'] = str(e)
+
+try:
     from cli.corpus_commands import corpus as corpus_group
     CORPUS_OK = True
 except (ImportError, OSError) as e:
@@ -123,11 +130,23 @@ class TestProjectCommands(unittest.TestCase):
 class TestAnalyzeCommandsStructure(unittest.TestCase):
     """Test that analyze command group has expected subcommands."""
 
-    def test_analyze_group_has_subcommands(self):
+    def test_analyze_group_has_canonical_commands(self):
         commands = analyze_group.list_commands(None)
-        expected = ['topk', 'search', 'exact', 'tools', 'run']
+        # Unified search + direct plugin subcommands (new surface)
+        expected = [
+            'search',
+            'clustering', 'anomaly', 'visualize', 'entity',
+            'categorize', 'sentiment', 'summarize', 'interpret',
+            'tools',
+        ]
         for cmd in expected:
             self.assertIn(cmd, commands, f"Missing analyze subcommand: {cmd}")
+
+    def test_analyze_group_retains_deprecated_aliases(self):
+        commands = analyze_group.list_commands(None)
+        # Deprecated shims must remain for backwards compatibility
+        for cmd in ('topk', 'exact', 'run'):
+            self.assertIn(cmd, commands, f"Missing deprecated alias: {cmd}")
 
 
 # ─────────────────────────────────────────────
@@ -153,12 +172,19 @@ class TestVectorCommandsStructure(unittest.TestCase):
 class TestCorpusCommandsStructure(unittest.TestCase):
     """Test that corpus command group has expected subcommands."""
 
-    def test_corpus_group_has_subcommands(self):
+    def test_corpus_group_has_canonical_commands(self):
         commands = corpus_group.list_commands(None)
-        expected = ['add', 'remove', 'list', 'ingest', 'rebuild', 'summary',
-                    'provenance', 'reconstitute', 'find-source']
+        # Canonical commands (new surface)
+        expected = ['add', 'remove', 'list', 'provenance', 'find-source',
+                    'restore', 'update']
         for cmd in expected:
             self.assertIn(cmd, commands, f"Missing corpus subcommand: {cmd}")
+
+    def test_corpus_group_retains_deprecated_aliases(self):
+        commands = corpus_group.list_commands(None)
+        # Deprecated shims must remain for backwards compatibility
+        for cmd in ('ingest', 'rebuild', 'summary', 'reconstitute'):
+            self.assertIn(cmd, commands, f"Missing deprecated alias: {cmd}")
 
 
 # ─────────────────────────────────────────────
@@ -170,9 +196,13 @@ class TestMainCLI(unittest.TestCase):
     def test_cli_has_command_groups(self):
         """Verify the main CLI registers all command groups."""
         commands = main_cli.list_commands(None)
-        expected = ['project', 'corpus', 'vector', 'analyze']
+        expected = ['project', 'corpus', 'index', 'analyze']
         for cmd in expected:
             self.assertIn(cmd, commands, f"Missing CLI command group: {cmd}")
+
+    def test_cli_retains_deprecated_vector_group(self):
+        commands = main_cli.list_commands(None)
+        self.assertIn('vector', commands, "Deprecated 'vector' shim must remain registered")
 
     def test_cli_help_output(self):
         """Verify the CLI shows help without error."""
@@ -279,6 +309,91 @@ class TestResolvePaths(unittest.TestCase):
 
 
 # ─────────────────────────────────────────────
+# Index Commands
+# ─────────────────────────────────────────────
+
+@unittest.skipUnless(INDEX_OK, "index_commands import failed")
+class TestIndexCommandsStructure(unittest.TestCase):
+    """Test that index command group has expected subcommands."""
+
+    def test_index_group_has_subcommands(self):
+        commands = index_group.list_commands(None)
+        for cmd in ('build', 'status', 'chunks'):
+            self.assertIn(cmd, commands, f"Missing index subcommand: {cmd}")
+
+
+@unittest.skipUnless(INDEX_OK, "index_commands import failed")
+class TestIndexCommandsFunctional(unittest.TestCase):
+    """Functional tests for index commands with a mocked session."""
+
+    def setUp(self):
+        self.runner = CliRunner()
+        self.mock_vm = MagicMock()
+
+        # Minimal session object that _get_manager inspects
+        self.session = MagicMock()
+        self.session.vector_manager = self.mock_vm
+
+    def test_index_status_calls_get_vector_store_status(self):
+        result = self.runner.invoke(index_group, ['status'], obj=self.session)
+        self.assertEqual(result.exit_code, 0)
+        self.mock_vm.get_vector_store_status.assert_called_once()
+
+    def test_index_chunks_calls_get_file_chunks(self):
+        result = self.runner.invoke(
+            index_group, ['chunks', 'my_doc'], obj=self.session
+        )
+        self.assertEqual(result.exit_code, 0)
+        self.mock_vm.get_file_chunks.assert_called_once_with(
+            'my_doc', False, False, False
+        )
+
+    def test_index_chunks_with_meta_flag(self):
+        self.runner.invoke(
+            index_group, ['chunks', 'my_doc', '--meta'], obj=self.session
+        )
+        self.mock_vm.get_file_chunks.assert_called_once_with(
+            'my_doc', True, False, False
+        )
+
+    def test_index_chunks_with_summary_flag(self):
+        self.runner.invoke(
+            index_group, ['chunks', 'my_doc', '--summary'], obj=self.session
+        )
+        self.mock_vm.get_file_chunks.assert_called_once_with(
+            'my_doc', False, False, True
+        )
+
+    def test_index_build_confirms_before_rebuild(self):
+        # Decline the confirmation — rebuild should NOT be called
+        result = self.runner.invoke(
+            index_group, ['build'], obj=self.session, input='n\n'
+        )
+        self.mock_vm.rebuild_vector_store.assert_not_called()
+        self.assertIn("cancelled", result.output.lower())
+
+    def test_index_build_confirmed_calls_rebuild(self):
+        # Accept the confirmation — rebuild SHOULD be called
+        result = self.runner.invoke(
+            index_group, ['build'], obj=self.session, input='y\n'
+        )
+        self.mock_vm.rebuild_vector_store.assert_called_once()
+
+    def test_index_build_force_skips_prompt(self):
+        result = self.runner.invoke(
+            index_group, ['build', '--force'], obj=self.session, input='y\n'
+        )
+        self.mock_vm.rebuild_vector_store.assert_called_once()
+
+    def test_index_no_active_project_reports_error(self):
+        # session.vector_manager is None → no active project
+        bad_session = MagicMock()
+        bad_session.vector_manager = None
+        result = self.runner.invoke(index_group, ['status'], obj=bad_session)
+        self.assertIn("No active project", result.output)
+
+
+# ─────────────────────────────────────────────
 # Import status report
 # ─────────────────────────────────────────────
 
@@ -302,6 +417,11 @@ class TestCLIImportStatus(unittest.TestCase):
         if not CORPUS_OK:
             self.skipTest(f"corpus_commands: {CLI_IMPORT_ERRORS.get('corpus', 'unknown')}")
         self.assertTrue(CORPUS_OK)
+
+    def test_index_commands_importable(self):
+        if not INDEX_OK:
+            self.skipTest(f"index_commands: {CLI_IMPORT_ERRORS.get('index', 'unknown')}")
+        self.assertTrue(INDEX_OK)
 
     def test_main_cli_importable(self):
         if not MAIN_CLI_OK:
